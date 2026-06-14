@@ -77,7 +77,7 @@ export default function LoginPage() {
             Sign in to your account
           </h1>
           <p className="mb-6 text-sm text-[#6B7280]">
-            Enter your credentials to access the Inventory Intelligence platform.
+            Enter your credentials to continue.
           </p>
 
           <form onSubmit={handleSubmit}>
