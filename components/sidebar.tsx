@@ -29,7 +29,7 @@ export function Sidebar({ userEmail }: SidebarProps) {
       <div className="flex h-16 shrink-0 items-center justify-center px-4">
         <Link href="/dashboard" className="flex items-center justify-center">
           <Image
-            src="/TBC-Header-Logo.png"
+            src="/tb_logo.png"
             alt="Tropical Battery Company"
             width={220}
             height={48}

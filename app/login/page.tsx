@@ -63,7 +63,7 @@ export default function LoginPage() {
 
           <div className="mb-5 text-center">
             <Image
-              src="/TBC-Header-Logo.png"
+              src="/tb_logo.png"
               alt="Tropical Battery Company"
               width={220}
               height={40}
