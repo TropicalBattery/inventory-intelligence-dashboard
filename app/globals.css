@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --tbc-red: #cc2b2b;
+    --tbc-red-hover: #b02424;
+    --tbc-red-light: #fdf2f2;
+    --tbc-amber: #f5a000;
+    --tbc-amber-light: #fffbeb;
+    --tbc-sidebar: #111111;
+    --tbc-sidebar-text: #e5e5e5;
+    --tbc-sidebar-active: #cc2b2b;
+    --tbc-sidebar-hover: #1f1f1f;
+    --tbc-sidebar-icon: #888888;
+    --page-bg: #f3f4f6;
+    --card-bg: #ffffff;
+    --card-border: transparent;
+    --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+    --text-primary: #111111;
+    --text-secondary: #6b7280;
+    --text-muted: #9ca3af;
+    --border-default: #e5e7eb;
+    --border-subtle: #f3f4f6;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-[#F3F4F6] text-sm text-[#111111];
+  }
+}

@@ -1,0 +1,32 @@
+-- Inventory Intelligence Dashboard: first-user setup
+--
+-- Do not run this file automatically. Use one of the options below to create
+-- the first dashboard user in Supabase Auth.
+--
+-- Option 1: Supabase Dashboard
+--   1. Open Authentication > Users in your Supabase project.
+--   2. Click "Add user" > "Create new user".
+--   3. Enter email and password, enable "Auto Confirm User".
+--   4. Save the user.
+--
+-- Option 2: Supabase Admin API (curl)
+--   Replace YOUR_PROJECT_REF, SERVICE_ROLE_KEY, email, and password.
+--
+--   curl -X POST "https://YOUR_PROJECT_REF.supabase.co/auth/v1/admin/users" \
+--     -H "apikey: SERVICE_ROLE_KEY" \
+--     -H "Authorization: Bearer SERVICE_ROLE_KEY" \
+--     -H "Content-Type: application/json" \
+--     -d '{
+--       "email": "admin@example.com",
+--       "password": "choose-a-strong-password",
+--       "email_confirm": true
+--     }'
+--
+-- Option 3: Supabase SQL (auth.users is managed by GoTrue; prefer Options 1 or 2)
+--   Direct inserts into auth.users are not recommended. Use the dashboard or Admin API.
+--
+-- After creating the user, copy .env.local.example to .env.local and set:
+--   NEXT_PUBLIC_SUPABASE_URL
+--   NEXT_PUBLIC_SUPABASE_ANON_KEY
+--   SUPABASE_SERVICE_ROLE_KEY (server-side only, optional for dashboard reads)
+--   TENANT_ID=tropical-battery
