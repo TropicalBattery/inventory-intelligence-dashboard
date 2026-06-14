@@ -9,6 +9,7 @@ export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -107,17 +108,30 @@ export default function LoginPage() {
               >
                 Password
               </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                className="w-full rounded-xl border-[1.5px] border-[#E5E7EB] bg-[#F9FAFB] px-4 py-3 text-sm text-[#111111] transition-all focus:border-[#CC2B2B] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#CC2B2B]/10"
-                placeholder="Enter your password"
-              />
+              <div className="relative">
+                <input
+                  id="password"
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="current-password"
+                  required
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="w-full rounded-xl border-[1.5px] border-[#E5E7EB] bg-[#F9FAFB] py-3 pl-4 pr-11 text-sm text-[#111111] transition-all focus:border-[#CC2B2B] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#CC2B2B]/10"
+                  placeholder="Enter your password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9CA3AF] transition-colors hover:text-[#6B7280]"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  <i
+                    className={`ti ${showPassword ? "ti-eye-off" : "ti-eye"} text-lg`}
+                    aria-hidden="true"
+                  />
+                </button>
+              </div>
             </div>
 
             {error ? (
