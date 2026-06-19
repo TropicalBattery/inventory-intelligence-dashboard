@@ -8,6 +8,7 @@ import {
   type ReorderItemExplanationResult,
 } from "@/app/(main)/reorder/ai-actions";
 import { AiSummaryPanel } from "@/components/reorder/ai-summary-panel";
+import { CoverBadge } from "@/components/reorder/months-of-cover-display";
 import { ReorderExpandedPanel } from "@/components/reorder/reorder-expanded-panel";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
@@ -30,6 +31,7 @@ import {
   getStatusBadgeVariant,
   getStatusLabel,
 } from "@/lib/reorder-status-ui";
+import type { ItemSeasonalityProfile } from "@/lib/seasonality/types";
 import type {
   ReorderRecommendation,
   ReorderStatus,
@@ -39,6 +41,7 @@ import type {
 type ReorderActionTabProps = {
   recommendations: ReorderRecommendation[];
   diagnosticsBySku: Record<string, VelocityDiagnostic>;
+  seasonalityBySku: Record<string, ItemSeasonalityProfile>;
   onAttentionCountChange: (count: number) => void;
 };
 
@@ -189,6 +192,7 @@ function SortableHeader({
 export function ReorderActionTab({
   recommendations,
   diagnosticsBySku,
+  seasonalityBySku,
   onAttentionCountChange,
 }: ReorderActionTabProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("actionable");
@@ -614,6 +618,7 @@ export function ReorderActionTab({
                   direction={sortDirection}
                   onSort={handleSort}
                 />
+                <TableHead>Months of Cover</TableHead>
                 <TableHead className="w-10 text-right">
                   <span className="sr-only">Expand</span>
                 </TableHead>
@@ -624,11 +629,12 @@ export function ReorderActionTab({
                 const key = rowKey(rec);
                 const isSelected = selectedKeys.has(key);
                 const isExpanded = expandedSkus.has(key);
+                const seasonalityProfile = seasonalityBySku[rec.sku] ?? null;
 
                 return (
                   <Fragment key={key}>
                     <TableRow
-                      className={`cursor-pointer ${
+                      className={`cursor-pointer [&>td]:py-2 ${
                         isExpanded ? "bg-slate-50 hover:bg-slate-50" : ""
                       }`}
                       onClick={(event) => {
@@ -658,17 +664,24 @@ export function ReorderActionTab({
                           {getStatusLabel(rec.status)}
                         </Badge>
                       </TableCell>
-                      <TableCell className="font-mono text-sm font-semibold text-slate-900">
-                        {rec.sku}
-                      </TableCell>
                       <TableCell
-                        className="max-w-[240px]"
-                        title={rec.name ?? undefined}
+                        className="max-w-[220px]"
+                        title={`${rec.sku}${rec.name ? ` - ${rec.name}` : ""}`}
                       >
-                        <span className="line-clamp-2">{rec.name ?? "-"}</span>
+                        <div className="leading-tight">
+                          <p className="font-mono text-sm font-semibold text-slate-900">
+                            {rec.sku}
+                          </p>
+                          <p className="line-clamp-1 text-xs text-slate-500">
+                            {rec.name ?? "-"}
+                          </p>
+                        </div>
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {formatNumber(rec.quantityAvailable)}
+                      </TableCell>
+                      <TableCell>
+                        <CoverBadge rec={rec} />
                       </TableCell>
                       <TableCell className="text-right font-semibold tabular-nums text-slate-900">
                         {formatSuggestedQty(rec.suggestedQtyRounded)}
@@ -691,6 +704,7 @@ export function ReorderActionTab({
                           <ReorderExpandedPanel
                             rec={rec}
                             pipeline={rec.pipelineBreakdown}
+                            seasonalityProfile={seasonalityProfile}
                             explanation={explanationCache.get(key) ?? null}
                             isLoadingExplanation={explanationLoading.has(key)}
                           />

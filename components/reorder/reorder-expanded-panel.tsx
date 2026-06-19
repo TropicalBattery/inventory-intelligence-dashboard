@@ -2,17 +2,33 @@
 
 import { Info, Sparkles } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, useTransition, type ReactNode } from "react";
+import { createDraftPoSelection } from "@/app/(main)/reorder/actions";
 import type { ReorderItemExplanationResult } from "@/app/(main)/reorder/ai-actions";
+import { SeasonalWarningBadge } from "@/components/reorder/seasonal-warning-badge";
 import { AiFormattedText } from "@/components/reorder/ai-formatted-text";
 import { formatCurrencyJMD, formatNumber } from "@/lib/format";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import type { PipelineBreakdown } from "@/lib/pipeline-breakdown";
 import { formatRoundingInfo } from "@/lib/reorder-engine";
-import type { ReorderRecommendation, SupplierReference } from "@/lib/types";
+import {
+  computeMonthsOfCoverAtOrderQty,
+  formatMonthsOfCoverLabel,
+  getMonthsOfCoverBadgeClasses,
+  getMonthsOfCoverColorTier,
+} from "@/lib/reorder/months-of-cover";
+import { getSeasonalReorderWarning } from "@/lib/seasonality/reorder-warnings";
+import type { ItemSeasonalityProfile } from "@/lib/seasonality/types";
+import type {
+  ReorderRecommendation,
+  SupplierReference,
+  SupplierReliabilityRating,
+} from "@/lib/types";
 
 type ReorderExpandedPanelProps = {
   rec: ReorderRecommendation;
   pipeline: PipelineBreakdown;
+  seasonalityProfile?: ItemSeasonalityProfile | null;
   explanation: ReorderItemExplanationResult | null;
   isLoadingExplanation: boolean;
 };
@@ -25,6 +41,16 @@ function AnalysisSkeleton() {
       <div className="h-3 w-4/5 animate-pulse rounded bg-slate-200" />
     </div>
   );
+}
+
+function parseOrderQtyInput(value: string): number {
+  const trimmed = value.trim();
+  if (trimmed === "") {
+    return 0;
+  }
+
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 }
 
 function isValidNumber(value: number | null | undefined): value is number {
@@ -40,14 +66,6 @@ function formatUsdAmount(value: number | null | undefined): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
-}
-
-function formatLeadTimeDays(value: number | null | undefined): string {
-  if (!isValidNumber(value)) {
-    return "-";
-  }
-
-  return `${formatNumber(value)} days`;
 }
 
 function formatEstArrivalDate(
@@ -68,29 +86,8 @@ function formatEstArrivalDate(
   );
 }
 
-function computeMonthsOfCover(
-  rec: ReorderRecommendation,
-  orderQty: number
-): number | null {
-  if (
-    !isValidNumber(rec.avgDailyDemandUnits) ||
-    rec.avgDailyDemandUnits <= 0 ||
-    orderQty < 0
-  ) {
-    return null;
-  }
-
-  const months =
-    (rec.quantityAvailable + rec.quantityOnOrder + orderQty) /
-    (rec.avgDailyDemandUnits * 30.44);
-
-  return Number.isFinite(months) ? months : null;
-}
-
 function isCoverDemandUnknown(rec: ReorderRecommendation): boolean {
-  return (
-    !isValidNumber(rec.avgDailyDemandUnits) || rec.avgDailyDemandUnits <= 0
-  );
+  return computeMonthsOfCoverAtOrderQty(rec, 0) === null;
 }
 
 function getCoverPillClasses(
@@ -101,15 +98,7 @@ function getCoverPillClasses(
     return "border-[#E5E7EB] bg-[#F3F4F6] text-[#9CA3AF]";
   }
 
-  if (months === null || months < 1) {
-    return "border-[#FCA5A5] bg-[#FDF2F2] text-[#CC2B2B]";
-  }
-
-  if (months >= 3) {
-    return "border-[#86EFAC] bg-[#F0FDF4] text-[#16A34A]";
-  }
-
-  return "border-[#FDE68A] bg-[#FFFBEB] text-[#B45309]";
+  return getMonthsOfCoverBadgeClasses(getMonthsOfCoverColorTier(months));
 }
 
 function getCoverPillLabel(
@@ -131,15 +120,16 @@ function getCoverBadgeClasses(
     return "bg-[#F3F4F6] text-[#9CA3AF]";
   }
 
-  if (months < 1) {
-    return "bg-[#FDF2F2] text-[#CC2B2B]";
+  switch (getMonthsOfCoverColorTier(months)) {
+    case "red":
+      return "bg-[#FDF2F2] text-[#CC2B2B]";
+    case "amber":
+      return "bg-[#FFFBEB] text-[#B45309]";
+    case "green":
+      return "bg-[#F0FDF4] text-[#16A34A]";
+    default:
+      return "bg-[#F3F4F6] text-[#9CA3AF]";
   }
-
-  if (months >= 3) {
-    return "bg-[#F0FDF4] text-[#16A34A]";
-  }
-
-  return "bg-[#FFFBEB] text-[#B45309]";
 }
 
 function getStatusBadge(rec: ReorderRecommendation): {
@@ -180,14 +170,6 @@ function getStatusBadge(rec: ReorderRecommendation): {
     default:
       return null;
   }
-}
-
-function getRoundingSubLabel(rec: ReorderRecommendation): string | null {
-  if (!rec.roundingUnit) {
-    return null;
-  }
-
-  return `Rounded to nearest ${rec.roundingUnit}`;
 }
 
 function formatArrivalPillLabel(
@@ -295,18 +277,6 @@ function formatLineTotalValue(lineTotal: number | null): ReactNode {
   );
 }
 
-function formatMonthsOfCoverValue(months: number | null): ReactNode {
-  if (months === null) {
-    return <span className="text-sm text-[#9CA3AF]">-</span>;
-  }
-
-  return (
-    <span className="text-sm font-semibold text-[#111111]">
-      {months.toFixed(1)}
-    </span>
-  );
-}
-
 function ItemClassCategoryValue({
   itemClass,
   category,
@@ -331,33 +301,249 @@ function ItemClassCategoryValue({
   );
 }
 
-function PipelineBreakdownGrid({ pipeline }: { pipeline: PipelineBreakdown }) {
-  const allZero =
-    pipeline.inTransit === 0 &&
-    pipeline.inBond === 0 &&
-    pipeline.atPort === 0 &&
-    pipeline.inClearing === 0;
-
-  if (allZero) {
-    return (
-      <p className="mt-1 text-xs text-[#9CA3AF]">No stock in pipeline</p>
-    );
+function formatSupplierUnitPrice(unitPrice: number | null | undefined): string {
+  if (!isValidNumber(unitPrice)) {
+    return "-";
   }
 
-  const cells = [
-    { label: "In transit", value: pipeline.inTransit },
-    { label: "In bond", value: pipeline.inBond },
-    { label: "At port", value: pipeline.atPort },
-    { label: "In clearing", value: pipeline.inClearing },
-  ];
+  return formatCurrencyJMD(unitPrice);
+}
+
+function getReliabilityBadgeClasses(
+  rating: SupplierReliabilityRating | null
+): string {
+  switch (rating) {
+    case "Preferred":
+      return "border-[#86EFAC] bg-[#F0FDF4] text-[#16A34A]";
+    case "Approved":
+      return "border-[#BFDBFE] bg-[#EFF6FF] text-[#1D4ED8]";
+    case "Conditional":
+      return "border-[#FDE68A] bg-[#FFFBEB] text-[#B45309]";
+    default:
+      return "border-[#E5E7EB] bg-[#F3F4F6] text-[#9CA3AF]";
+  }
+}
+
+function PipelineSegment({
+  label,
+  value,
+  iconClass,
+  accent = false,
+}: {
+  label: string;
+  value: number;
+  iconClass: string;
+  accent?: boolean;
+}) {
+  return (
+    <div
+      className={[
+        "flex-1 px-3.5 py-2.5",
+        accent
+          ? "bg-[var(--pipeline-effective-bg)]"
+          : "border-r border-[var(--color-border-tertiary)] bg-[var(--color-background-secondary)]",
+      ].join(" ")}
+    >
+      <div
+        className={[
+          "mb-1 flex items-center gap-1 text-[10px] tracking-wide",
+          accent
+            ? "text-[var(--pipeline-effective-label)]"
+            : "text-[var(--color-text-secondary)]",
+        ].join(" ")}
+      >
+        <i className={`ti ${iconClass} text-xs`} aria-hidden="true" />
+        {label}
+      </div>
+      <div
+        className={[
+          "text-base font-medium tabular-nums",
+          accent
+            ? "text-[var(--pipeline-effective-value)]"
+            : "text-[var(--color-text-primary)]",
+        ].join(" ")}
+      >
+        {formatNumber(value)}
+      </div>
+    </div>
+  );
+}
+
+function PipelineStockSection({
+  rec,
+  pipeline,
+}: {
+  rec: ReorderRecommendation;
+  pipeline: PipelineBreakdown;
+}) {
+  return (
+    <div className="mb-5">
+      <h4 className="mb-3 text-xs font-semibold uppercase tracking-widest text-[#6B7280]">
+        Pipeline stock
+      </h4>
+      <div className="flex items-stretch overflow-hidden rounded-[var(--border-radius-md)] border border-[var(--color-border-tertiary)]">
+        <PipelineSegment
+          label="In transit"
+          value={pipeline.inTransit}
+          iconClass="ti-ship"
+        />
+        <PipelineSegment
+          label="In bond"
+          value={pipeline.inBond}
+          iconClass="ti-lock"
+        />
+        <PipelineSegment
+          label="At port"
+          value={pipeline.atPort}
+          iconClass="ti-anchor"
+        />
+        <PipelineSegment
+          label="In clearing"
+          value={pipeline.inClearing}
+          iconClass="ti-file-text"
+        />
+        <PipelineSegment
+          label="Effective available"
+          value={rec.effectiveAvailable}
+          iconClass="ti-stack"
+          accent
+        />
+      </div>
+    </div>
+  );
+}
+
+function AnalysisSection({
+  explanation,
+  isLoadingExplanation,
+  dataGaps,
+}: {
+  explanation: ReorderItemExplanationResult | null;
+  isLoadingExplanation: boolean;
+  dataGaps: string[];
+}) {
+  return (
+    <div className="mb-5 rounded-lg bg-white p-5 ring-1 ring-slate-200">
+      <div className="flex items-center gap-2">
+        <Sparkles className="h-4 w-4 text-tbc-red" aria-hidden="true" />
+        <h4 className="text-sm font-semibold text-slate-900">Analysis</h4>
+      </div>
+
+      <div className="mt-4">
+        {isLoadingExplanation ? (
+          <AnalysisSkeleton />
+        ) : explanation ? (
+          <AiFormattedText text={explanation.explanation} />
+        ) : null}
+      </div>
+
+      {dataGaps.length > 0 ? (
+        <ul className="mt-3 space-y-1.5 border-t border-slate-200 pt-3">
+          {dataGaps.map((gap) => (
+            <li
+              key={gap}
+              className="flex items-start gap-2 text-xs text-slate-500"
+            >
+              <Info
+                className="mt-0.5 h-3 w-3 shrink-0 text-slate-400"
+                aria-hidden="true"
+              />
+              <span>{gap}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function InventoryDetailsSection({
+  rec,
+  lineTotal,
+}: {
+  rec: ReorderRecommendation;
+  lineTotal: number | null;
+}) {
+  const roundingInfo = formatRoundingInfo(rec);
+  const showQtyOnOrder = rec.quantityOnOrder > 0;
+  const showQtyInPipeline = rec.quantityInPipeline > 0;
+  const showMaxStockLevel =
+    rec.maximumStockLevel !== null && rec.maximumStockLevel !== 0;
+  const showRounding = roundingInfo !== "-";
+  const showLineTotal = lineTotal !== null && lineTotal !== 0;
 
   return (
-    <div className="mt-1 grid grid-cols-2 gap-1">
-      {cells.map((cell) => (
-        <p key={cell.label} className="text-xs text-[#6B7280]">
-          {cell.label}: {formatNumber(cell.value)}
-        </p>
-      ))}
+    <div className="mt-5">
+      <h4 className="mb-3 text-xs font-semibold uppercase tracking-widest text-[#6B7280]">
+        Inventory Details
+      </h4>
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-5 border-t border-[#F3F4F6] pt-5 lg:grid-cols-4">
+        <InventoryDetailItem
+          label="Qty Available (GP)"
+          iconClass="ti-package"
+          value={formatInventoryNumber(rec.quantityAvailable)}
+        />
+        {showQtyOnOrder ? (
+          <InventoryDetailItem
+            label="Qty On Order"
+            iconClass="ti-shopping-cart"
+            value={formatInventoryNumber(rec.quantityOnOrder)}
+          />
+        ) : null}
+        {showQtyInPipeline ? (
+          <InventoryDetailItem
+            label="Qty In Pipeline"
+            iconClass="ti-arrow-down-circle"
+            value={formatInventoryNumber(rec.quantityInPipeline)}
+          />
+        ) : null}
+        <InventoryDetailItem
+          label="ROP"
+          iconClass="ti-alert-triangle"
+          value={formatInventoryNullableNumber(rec.rop)}
+        />
+        <InventoryDetailItem
+          label="Reorder Level"
+          iconClass="ti-calendar"
+          value={formatInventoryNullableNumber(rec.reorderLevel)}
+        />
+        {showMaxStockLevel ? (
+          <InventoryDetailItem
+            label="Max Stock Level"
+            iconClass="ti-box"
+            value={formatInventoryNullableNumber(rec.maximumStockLevel)}
+          />
+        ) : null}
+        <InventoryDetailItem
+          label="Item Class / Category"
+          iconClass="ti-tag"
+          value={
+            <ItemClassCategoryValue
+              itemClass={rec.itemClass}
+              category={rec.category}
+            />
+          }
+        />
+        {showRounding ? (
+          <InventoryDetailItem
+            label="Rounding"
+            iconClass="ti-adjustments"
+            value={formatInventoryTextValue(roundingInfo)}
+          />
+        ) : null}
+        <InventoryDetailItem
+          label="Unit Cost"
+          iconClass="ti-currency-dollar"
+          value={formatUnitCostValue(rec.unitCost)}
+        />
+        {showLineTotal ? (
+          <InventoryDetailItem
+            label="Line Total"
+            iconClass="ti-receipt"
+            value={formatLineTotalValue(lineTotal)}
+          />
+        ) : null}
+      </dl>
     </div>
   );
 }
@@ -365,6 +551,7 @@ function PipelineBreakdownGrid({ pipeline }: { pipeline: PipelineBreakdown }) {
 export function ReorderExpandedPanel({
   rec,
   pipeline,
+  seasonalityProfile = null,
   explanation,
   isLoadingExplanation,
 }: ReorderExpandedPanelProps) {
@@ -374,7 +561,14 @@ export function ReorderExpandedPanel({
       : null;
   const dataGaps = explanation?.dataGaps ?? rec.dataGaps;
 
-  const [simQty, setSimQty] = useState(rec.suggestedQtyRounded);
+  const [orderQtyInput, setOrderQtyInput] = useState(
+    String(rec.suggestedQtyRounded)
+  );
+  const parsedOrderQty = useMemo(
+    () => parseOrderQtyInput(orderQtyInput),
+    [orderQtyInput]
+  );
+  const debouncedOrderQty = useDebouncedValue(parsedOrderQty, 300);
   const [selectedSupplierExternalId, setSelectedSupplierExternalId] = useState<
     string | null
   >(rec.supplierExternalId);
@@ -383,11 +577,14 @@ export function ReorderExpandedPanel({
   >(rec.supplierUnitPrice);
   const [suppliers, setSuppliers] = useState<SupplierReference[]>([]);
   const [suppliersLoading, setSuppliersLoading] = useState(true);
+  const [addToPoError, setAddToPoError] = useState<string | null>(null);
+  const [isAddingToPo, startAddToPoTransition] = useTransition();
 
   useEffect(() => {
-    setSimQty(rec.suggestedQtyRounded);
+    setOrderQtyInput(String(rec.suggestedQtyRounded));
     setSelectedSupplierExternalId(rec.supplierExternalId);
     setSelectedSupplierPrice(rec.supplierUnitPrice);
+    setAddToPoError(null);
   }, [rec.sku, rec.suggestedQtyRounded, rec.supplierExternalId, rec.supplierUnitPrice]);
 
   useEffect(() => {
@@ -401,19 +598,23 @@ export function ReorderExpandedPanel({
       .finally(() => setSuppliersLoading(false));
   }, [rec.sku]);
 
+  const debouncedMonthsOfCover = useMemo(
+    () => computeMonthsOfCoverAtOrderQty(rec, debouncedOrderQty),
+    [rec, debouncedOrderQty]
+  );
   const totalCostUsd = useMemo(() => {
-    if (!isValidNumber(selectedSupplierPrice) || simQty <= 0) {
+    if (!isValidNumber(selectedSupplierPrice) || debouncedOrderQty <= 0) {
       return "-";
     }
 
-    return formatUsdAmount(selectedSupplierPrice * simQty);
-  }, [selectedSupplierPrice, simQty]);
-
-  const simulatorArrival = formatEstArrivalDate(rec.leadTimeDays, simQty > 0);
-  const suggestedMonthsOfCover = computeMonthsOfCover(rec, rec.suggestedQtyRounded);
-  const simulatedMonthsOfCover = computeMonthsOfCover(rec, simQty);
+    return formatUsdAmount(selectedSupplierPrice * debouncedOrderQty);
+  }, [selectedSupplierPrice, debouncedOrderQty]);
+  const simulatorArrival = formatEstArrivalDate(rec.leadTimeDays, debouncedOrderQty > 0);
+  const suggestedMonthsOfCover = computeMonthsOfCoverAtOrderQty(
+    rec,
+    rec.suggestedQtyRounded
+  );
   const coverDemandUnknown = isCoverDemandUnknown(rec);
-  const roundingSubLabel = getRoundingSubLabel(rec);
   const suggestedArrivalLabel = formatArrivalPillLabel(rec.leadTimeDays);
   const statusBadge = getStatusBadge(rec);
   const suggestedTotalCost = useMemo(() => {
@@ -427,25 +628,37 @@ export function ReorderExpandedPanel({
     return rec.supplierUnitPrice * rec.suggestedQtyRounded;
   }, [rec.supplierUnitPrice, rec.suggestedQtyRounded]);
 
-  const lowestSupplierPrice = useMemo(() => {
-    const prices = suppliers
-      .map((supplier) => supplier.unitPrice)
-      .filter(isValidNumber);
-
-    if (prices.length === 0) {
-      return null;
-    }
-
-    return Math.min(...prices);
-  }, [suppliers]);
-
   function handleSelectSupplier(supplier: SupplierReference) {
     setSelectedSupplierExternalId(supplier.supplierExternalId);
     setSelectedSupplierPrice(supplier.unitPrice);
   }
 
+  function handleAddToPo() {
+    setAddToPoError(null);
+
+    startAddToPoTransition(async () => {
+      const result = await createDraftPoSelection([
+        {
+          sku: rec.sku,
+          supplierExternalId: selectedSupplierExternalId,
+          suggestedQty: parseOrderQtyInput(orderQtyInput),
+        },
+      ]);
+
+      if (!result.success) {
+        setAddToPoError(result.error ?? "Failed to add item to PO");
+      }
+    });
+  }
+
   return (
     <div className="border-t border-[#E5E7EB] bg-[#F9FAFB] px-4 py-4">
+      {getSeasonalReorderWarning(seasonalityProfile) ? (
+        <div className="mb-4">
+          <SeasonalWarningBadge profile={seasonalityProfile} />
+        </div>
+      ) : null}
+
       <div className="mb-5 grid grid-cols-2 gap-8 divide-x divide-[#E5E7EB] rounded-2xl border border-[#E5E7EB] bg-white p-6">
         <div>
           <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-[#6B7280]">
@@ -490,10 +703,6 @@ export function ReorderExpandedPanel({
               {suggestedArrivalLabel ?? "Lead time unknown"}
             </span>
           </div>
-
-          {roundingSubLabel ? (
-            <p className="mt-3 text-xs text-[#9CA3AF]">{roundingSubLabel}</p>
-          ) : null}
         </div>
 
         <div className="pl-8">
@@ -505,18 +714,14 @@ export function ReorderExpandedPanel({
               type="number"
               min={0}
               step={1}
-              value={simQty}
-              onChange={(event) => {
-                const nextValue = Number(event.target.value);
-                setSimQty(
-                  Number.isFinite(nextValue) ? Math.max(0, nextValue) : 0
-                );
-              }}
+              value={orderQtyInput}
+              onChange={(event) => setOrderQtyInput(event.target.value)}
+              aria-label="Simulated order quantity"
               className="w-28 rounded-xl border-2 border-[#E5E7EB] px-3 py-2 text-center text-3xl font-bold text-[#111111] transition-all duration-150 focus:border-[#CC2B2B] focus:outline-none focus:ring-2 focus:ring-[#CC2B2B]/10"
             />
             <button
               type="button"
-              onClick={() => setSimQty(rec.suggestedQtyRounded)}
+              onClick={() => setOrderQtyInput(String(rec.suggestedQtyRounded))}
               className="cursor-pointer text-xs text-[#9CA3AF] underline underline-offset-2 hover:text-[#6B7280]"
             >
               Reset
@@ -530,13 +735,13 @@ export function ReorderExpandedPanel({
               </span>
               <span
                 className={`rounded-lg px-2.5 py-0.5 text-xs font-semibold ${getCoverBadgeClasses(
-                  simulatedMonthsOfCover,
+                  debouncedMonthsOfCover,
                   coverDemandUnknown
                 )}`}
               >
-                {coverDemandUnknown || simulatedMonthsOfCover === null
+                {coverDemandUnknown || debouncedMonthsOfCover === null
                   ? "Unknown"
-                  : `${simulatedMonthsOfCover.toFixed(1)} months`}
+                  : formatMonthsOfCoverLabel(debouncedMonthsOfCover)}
               </span>
             </div>
             <div className="flex items-center justify-between py-3">
@@ -568,243 +773,168 @@ export function ReorderExpandedPanel({
               </span>
             </div>
           </div>
+
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              disabled={isAddingToPo}
+              onClick={handleAddToPo}
+              className="rounded-xl bg-tbc-red px-4 py-2 text-sm font-medium text-white transition-colors duration-150 hover:bg-tbc-red-hover disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isAddingToPo ? "Adding..." : "Add to PO"}
+            </button>
+          </div>
+
+          {addToPoError ? (
+            <p role="alert" className="mt-3 text-sm text-red-600">
+              {addToPoError}
+            </p>
+          ) : null}
         </div>
       </div>
 
-      <div className="mt-5">
-        <div className="mb-3 flex items-center justify-between">
-          <h4 className="text-xs font-semibold uppercase tracking-widest text-[#6B7280]">
-            Available Suppliers
-          </h4>
-          {suppliers.length > 0 ? (
+      <AnalysisSection
+        explanation={explanation}
+        isLoadingExplanation={isLoadingExplanation}
+        dataGaps={dataGaps}
+      />
+
+      {!suppliersLoading && suppliers.length > 0 ? (
+        <div className="mb-5">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-widest text-[#6B7280]">
+                Available Suppliers
+              </h4>
+              <p className="mt-1 text-xs text-[#9CA3AF]">
+                Reference data quotes for this SKU only
+              </p>
+            </div>
             <span className="text-xs text-[#9CA3AF]">
               {formatNumber(suppliers.length)} supplier
               {suppliers.length === 1 ? "" : "s"}
             </span>
-          ) : null}
-        </div>
+          </div>
 
-        {suppliersLoading ? (
-          <div className="space-y-2">
-            {Array.from({ length: 3 }).map((_, index) => (
-              <div
-                key={`supplier-skeleton-${index}`}
-                className="h-8 w-full animate-pulse rounded bg-[#F3F4F6]"
-              />
-            ))}
-          </div>
-        ) : suppliers.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-[#E5E7EB] bg-[#F9FAFB] p-6 text-center">
-            <p className="mb-1 text-sm text-[#6B7280]">
-              No supplier pricing on file for this SKU.
-            </p>
-            <Link
-              href="/reference-data"
-              className="text-xs text-[#CC2B2B] hover:underline"
-            >
-              Add pricing via Reference Data
-            </Link>
-          </div>
-        ) : (
           <div className="overflow-hidden rounded-xl border border-[#E5E7EB]">
-            <div className="grid grid-cols-[minmax(10rem,1.4fr)_9rem_8rem_7rem_10rem_7rem] border-b border-[#E5E7EB] bg-[#F9FAFB] px-4 py-2.5 text-xs font-semibold uppercase tracking-widest text-[#6B7280]">
-              <span>Supplier</span>
-              <span>Vendor Item</span>
-              <span className="text-right">Unit Price</span>
-              <span className="text-right">Lead Time</span>
-              <span className="text-right">Est. Arrival</span>
-              <span className="text-right"> </span>
-            </div>
-            {suppliers.map((supplier) => {
-              const isSelected =
-                selectedSupplierExternalId === supplier.supplierExternalId;
-              const isBestPrice =
-                isValidNumber(supplier.unitPrice) &&
-                isValidNumber(lowestSupplierPrice) &&
-                supplier.unitPrice === lowestSupplierPrice;
-
-              return (
-                <div
-                  key={supplier.supplierExternalId}
-                  className={[
-                    "grid grid-cols-[minmax(10rem,1.4fr)_9rem_8rem_7rem_10rem_7rem] items-center border-t border-[#F3F4F6] px-4 py-3 text-sm transition-colors hover:bg-[#F9FAFB]",
-                    supplier.isPriorityVendor
-                      ? "border-l-2 border-l-[#16A34A] bg-[#F0FDF4]/50"
-                      : "",
-                    isSelected ? "bg-[#EFF6FF]/60" : "bg-white",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                >
-                  <div>
-                    <span className="font-mono text-xs font-medium text-[#111111]">
-                      {supplier.supplierExternalId}
-                    </span>
-                    {supplier.isPriorityVendor ? (
-                      <span className="ml-2 rounded-full bg-[#F0FDF4] px-2 py-0.5 font-sans text-xs text-[#16A34A]">
-                        Preferred
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="text-[#111111]">
-                    {supplier.vendorItemNumber ? (
-                      supplier.vendorItemNumber
-                    ) : (
-                      <span className="text-[#9CA3AF]">-</span>
-                    )}
-                  </div>
-                  <div className="text-right">
-                    {isValidNumber(supplier.unitPrice) ? (
-                      <span className="inline-flex items-center justify-end font-medium text-[#111111]">
-                        {formatUsdAmount(supplier.unitPrice)}
-                        {isBestPrice ? (
-                          <span className="ml-1 rounded-full bg-[#FFFBEB] px-2 py-0.5 text-xs text-[#B45309]">
-                            Best Price
-                          </span>
-                        ) : null}
-                      </span>
-                    ) : (
-                      <span className="text-[#9CA3AF]">-</span>
-                    )}
-                  </div>
-                  <div className="text-right text-[#111111]">
-                    {isValidNumber(supplier.leadTimeDays) ? (
-                      formatLeadTimeDays(supplier.leadTimeDays)
-                    ) : (
-                      <span className="text-[#9CA3AF]">-</span>
-                    )}
-                  </div>
-                  <div className="text-right text-xs text-[#6B7280]">
-                    {formatEstArrivalDate(supplier.leadTimeDays, true) === "-" ? (
-                      <span className="text-[#9CA3AF]">-</span>
-                    ) : (
-                      formatEstArrivalDate(supplier.leadTimeDays, true)
-                    )}
-                  </div>
-                  <div className="text-right">
-                    {isSelected ? (
-                      <span className="inline-flex cursor-default rounded-full border border-[#86EFAC] bg-[#F0FDF4] px-3 py-1 text-xs font-medium text-[#16A34A]">
-                        Selected
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleSelectSupplier(supplier)}
-                        className="cursor-pointer rounded-full border border-[#E5E7EB] px-3 py-1 text-xs text-[#6B7280] transition-colors duration-150 hover:border-[#CC2B2B] hover:text-[#CC2B2B]"
-                      >
-                        Select
-                      </button>
-                    )}
-                  </div>
+            <div className="max-h-[17.5rem] overflow-y-auto">
+              <div className="min-w-[56rem]">
+                <div className="sticky top-0 z-10 grid grid-cols-[minmax(10rem,1.2fr)_6rem_7rem_8rem_7rem_6rem_5.5rem] border-b border-[#E5E7EB] bg-[#F9FAFB] px-4 py-2.5 text-xs font-semibold uppercase tracking-widest text-[#6B7280]">
+                  <span>Supplier Name</span>
+                  <span className="text-right">Lead Time</span>
+                  <span className="text-right">Unit Price (J$)</span>
+                  <span>Reliability</span>
+                  <span>Region</span>
+                  <span className="text-right">Min Order</span>
+                  <span className="text-right"> </span>
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+                {suppliers.map((supplier) => {
+                  const isSelected =
+                    selectedSupplierExternalId === supplier.supplierExternalId;
 
-      <div className="mt-5">
-        <h4 className="mb-3 text-xs font-semibold uppercase tracking-widest text-[#6B7280]">
-          Inventory Details
-        </h4>
-        <dl className="grid grid-cols-2 gap-x-6 gap-y-5 border-t border-[#F3F4F6] pt-5 lg:grid-cols-4">
-          <InventoryDetailItem
-            label="Qty On Order"
-            iconClass="ti-shopping-cart"
-            value={formatInventoryNumber(rec.quantityOnOrder)}
-          />
-          <InventoryDetailItem
-            label="Qty In Pipeline"
-            iconClass="ti-arrow-down-circle"
-            value={
-              <div>
-                {formatInventoryNumber(rec.quantityInPipeline)}
-                <PipelineBreakdownGrid pipeline={pipeline} />
+                  return (
+                    <div
+                      key={supplier.supplierExternalId}
+                      className={[
+                        "grid grid-cols-[minmax(10rem,1.2fr)_6rem_7rem_8rem_7rem_6rem_5.5rem] items-center border-t border-[#F3F4F6] px-4 py-3 text-sm transition-colors hover:bg-[#F9FAFB]",
+                        isSelected ? "bg-[#EFF6FF]/60" : "bg-white",
+                      ].join(" ")}
+                    >
+                      <div>
+                        <p className="font-medium text-[#111111]">
+                          {supplier.supplierName ?? supplier.supplierExternalId}
+                        </p>
+                        <p className="mt-0.5 font-mono text-xs text-[#9CA3AF]">
+                          {supplier.supplierExternalId}
+                        </p>
+                      </div>
+                      <div className="text-right text-[#111111]">
+                        {isValidNumber(supplier.leadTimeDays) ? (
+                          `${formatNumber(supplier.leadTimeDays)}d`
+                        ) : (
+                          <span className="text-[#9CA3AF]">-</span>
+                        )}
+                      </div>
+                      <div className="text-right font-medium text-[#111111]">
+                        {formatSupplierUnitPrice(supplier.unitPrice)}
+                      </div>
+                      <div>
+                        {supplier.reliabilityRating ? (
+                          <span
+                            className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-semibold ${getReliabilityBadgeClasses(
+                              supplier.reliabilityRating
+                            )}`}
+                          >
+                            {supplier.reliabilityRating}
+                          </span>
+                        ) : (
+                          <span className="text-[#9CA3AF]">-</span>
+                        )}
+                      </div>
+                      <div className="text-[#111111]">
+                        {supplier.supplierRegion ? (
+                          supplier.supplierRegion
+                        ) : (
+                          <span className="text-[#9CA3AF]">-</span>
+                        )}
+                      </div>
+                      <div className="text-right text-[#111111]">
+                        {isValidNumber(supplier.minOrderQty) ? (
+                          formatNumber(supplier.minOrderQty)
+                        ) : (
+                          <span className="text-[#9CA3AF]">-</span>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        {isSelected ? (
+                          <span className="inline-flex cursor-default rounded-full border border-[#86EFAC] bg-[#F0FDF4] px-3 py-1 text-xs font-medium text-[#16A34A]">
+                            Selected
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleSelectSupplier(supplier)}
+                            className="cursor-pointer rounded-full border border-[#E5E7EB] px-3 py-1 text-xs text-[#6B7280] transition-colors duration-150 hover:border-[#CC2B2B] hover:text-[#CC2B2B]"
+                          >
+                            Select
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            }
-          />
-          <InventoryDetailItem
-            label="ROP"
-            iconClass="ti-alert-triangle"
-            value={formatInventoryNullableNumber(rec.rop)}
-          />
-          <InventoryDetailItem
-            label="Reorder Level"
-            iconClass="ti-calendar"
-            value={formatInventoryNullableNumber(rec.reorderLevel)}
-          />
-          <InventoryDetailItem
-            label="Max Stock Level"
-            iconClass="ti-box"
-            value={formatInventoryNullableNumber(rec.maximumStockLevel)}
-          />
-          <InventoryDetailItem
-            label="Item Class / Category"
-            iconClass="ti-tag"
-            value={
-              <ItemClassCategoryValue
-                itemClass={rec.itemClass}
-                category={rec.category}
-              />
-            }
-          />
-          <InventoryDetailItem
-            label="Rounding"
-            iconClass="ti-adjustments"
-            value={formatInventoryTextValue(formatRoundingInfo(rec))}
-          />
-          <InventoryDetailItem
-            label="Unit Cost"
-            iconClass="ti-currency-dollar"
-            value={formatUnitCostValue(rec.unitCost)}
-          />
-          <InventoryDetailItem
-            label="Line Total"
-            iconClass="ti-receipt"
-            value={formatLineTotalValue(lineTotal)}
-          />
-          <InventoryDetailItem
-            label="Months of Cover"
-            iconClass="ti-clock"
-            value={formatMonthsOfCoverValue(suggestedMonthsOfCover)}
-          />
-        </dl>
-      </div>
-
-      <div className="mt-4 rounded-lg bg-white p-5 ring-1 ring-slate-200">
-        <div className="flex items-center gap-2">
-          <Sparkles
-            className="h-4 w-4 text-tbc-red"
-            aria-hidden="true"
-          />
-          <h4 className="text-sm font-semibold text-slate-900">Analysis</h4>
+            </div>
+          </div>
         </div>
+      ) : null}
 
-        <div className="mt-4">
-          {isLoadingExplanation ? (
-            <AnalysisSkeleton />
-          ) : explanation ? (
-            <AiFormattedText text={explanation.explanation} />
-          ) : null}
+      {suppliersLoading ? (
+        <div className="mb-5 space-y-2">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <div
+              key={`supplier-skeleton-${index}`}
+              className="h-10 w-full animate-pulse rounded bg-[#F3F4F6]"
+            />
+          ))}
         </div>
+      ) : suppliers.length === 0 ? (
+        <div className="mb-5 rounded-xl border border-dashed border-[#E5E7EB] bg-[#F9FAFB] p-6 text-center">
+          <p className="mb-1 text-sm text-[#6B7280]">
+            No supplier pricing on file for this SKU.
+          </p>
+          <Link
+            href="/reference-data"
+            className="text-xs text-[#CC2B2B] hover:underline"
+          >
+            Add pricing via Reference Data
+          </Link>
+        </div>
+      ) : null}
 
-        {dataGaps.length > 0 ? (
-          <ul className="mt-3 space-y-1.5 border-t border-slate-200 pt-3">
-            {dataGaps.map((gap) => (
-              <li
-                key={gap}
-                className="flex items-start gap-2 text-xs text-slate-500"
-              >
-                <Info
-                  className="mt-0.5 h-3 w-3 shrink-0 text-slate-400"
-                  aria-hidden="true"
-                />
-                <span>{gap}</span>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </div>
+      <PipelineStockSection rec={rec} pipeline={pipeline} />
+
+      <InventoryDetailsSection rec={rec} lineTotal={lineTotal} />
     </div>
   );
 }

@@ -39,6 +39,8 @@ function baseReorderRow(
     isActive: true,
     quantityOnHand: 40,
     quantityAvailable: 40,
+    quantityAllocated: 0,
+    effectiveAvailable: 40,
     quantityOnOrder: 0,
     quantityInPipeline: 0,
     pipelineBreakdown: {

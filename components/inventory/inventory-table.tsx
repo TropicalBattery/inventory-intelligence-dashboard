@@ -6,7 +6,8 @@ import { Package, Search } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
-import {  Table,
+import {
+  Table,
   TableBody,
   TableCell,
   TableHead,
@@ -177,7 +178,8 @@ export function InventoryTable({ items, locationsBySku }: InventoryTableProps) {
   if (items.length === 0) {
     return (
       <div className="space-y-6">
-        <EmptyState          icon={Package}
+        <EmptyState
+          icon={Package}
           title="No inventory data yet"
           description="Sync data from the connector to see current stock levels."
           action={
@@ -203,7 +205,8 @@ export function InventoryTable({ items, locationsBySku }: InventoryTableProps) {
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-end gap-4 rounded-2xl border border-transparent shadow-card bg-white p-4">        <div className="min-w-[220px] flex-1">
+      <div className="flex flex-wrap items-end gap-4 rounded-2xl border border-transparent bg-white p-4 shadow-card">
+        <div className="min-w-[220px] flex-1">
           <label
             htmlFor="inventory-search"
             className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500"
@@ -341,28 +344,33 @@ export function InventoryTable({ items, locationsBySku }: InventoryTableProps) {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <Table containerClassName="rounded-none border-0">
+              <Table
+                containerClassName="w-max min-w-full rounded-none border-0 shadow-none !overflow-visible"
+                className="min-w-[1180px]"
+              >
                 <TableHeader>
                   <TableRow className="hover:bg-transparent">
-                    <TableHead className="min-w-[120px] px-5">SKU</TableHead>
-                    <TableHead className="min-w-[220px] px-5">Product Name</TableHead>
-                    <TableHead className="min-w-[140px] px-5">Category / Class</TableHead>
-                    <TableHead className="min-w-[110px] px-5 text-right">
+                    <TableHead className="w-[132px] px-5">SKU</TableHead>
+                    <TableHead className="min-w-[200px] px-5">Product Name</TableHead>
+                    <TableHead className="min-w-[160px] px-5">
+                      Class / Category
+                    </TableHead>
+                    <TableHead className="w-[108px] px-5 text-right">
                       Qty Available
                     </TableHead>
-                    <TableHead className="min-w-[110px] px-5 text-right">
+                    <TableHead className="w-[108px] px-5 text-right">
                       Qty On Hand
                     </TableHead>
-                    <TableHead className="min-w-[110px] px-5 text-right">
+                    <TableHead className="w-[108px] px-5 text-right">
                       Qty On Order
                     </TableHead>
-                    <TableHead className="min-w-[110px] px-5 text-right">
+                    <TableHead className="w-[108px] px-5 text-right">
                       Reorder Level
                     </TableHead>
-                    <TableHead className="min-w-[120px] px-5 text-right">
+                    <TableHead className="w-[120px] px-5 text-right">
                       Max Stock Level
                     </TableHead>
-                    <TableHead className="min-w-[130px] px-5">Status</TableHead>
+                    <TableHead className="w-[128px] px-5">Status</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -378,7 +386,7 @@ export function InventoryTable({ items, locationsBySku }: InventoryTableProps) {
                     return (
                       <Fragment key={recommendation.sku}>
                         <TableRow
-                          className="cursor-pointer"
+                          className="cursor-pointer [&>td]:py-2.5"
                           onClick={() =>
                             setExpandedSku((current) =>
                               current === recommendation.sku
@@ -387,44 +395,49 @@ export function InventoryTable({ items, locationsBySku }: InventoryTableProps) {
                             )
                           }
                         >
-                          <TableCell className="px-5 py-3.5 font-mono text-sm font-semibold text-slate-900">
+                          <TableCell className="px-5 font-mono text-sm font-semibold text-slate-900">
                             {recommendation.sku}
                           </TableCell>
                           <TableCell
-                            className="max-w-xs px-5 py-3.5"
+                            className="max-w-[280px] px-5"
                             title={recommendation.name ?? undefined}
                           >
-                            <span className="line-clamp-2">
+                            <span className="line-clamp-1">
                               {recommendation.name ?? "-"}
                             </span>
                           </TableCell>
-                          <TableCell className="whitespace-nowrap px-5 py-3.5">
+                          <TableCell
+                            className="max-w-[220px] truncate px-5 text-slate-700"
+                            title={classCategory || undefined}
+                          >
                             {classCategory || "-"}
                           </TableCell>
                           <TableCell
-                            className={`px-5 py-3.5 text-right tabular-nums ${
-                              availableIsZero ? "font-semibold text-red-600" : ""
+                            className={`px-5 text-right tabular-nums ${
+                              availableIsZero
+                                ? "font-semibold text-red-600"
+                                : "text-slate-900"
                             }`}
                           >
                             {formatNumber(recommendation.quantityAvailable)}
                           </TableCell>
-                          <TableCell className="px-5 py-3.5 text-right tabular-nums">
+                          <TableCell className="px-5 text-right tabular-nums text-slate-900">
                             {formatNumber(recommendation.quantityOnHand)}
                           </TableCell>
-                          <TableCell className="px-5 py-3.5 text-right tabular-nums">
+                          <TableCell className="px-5 text-right tabular-nums text-slate-900">
                             {formatNumber(recommendation.quantityOnOrder)}
                           </TableCell>
-                          <TableCell className="px-5 py-3.5 text-right tabular-nums">
+                          <TableCell className="px-5 text-right tabular-nums text-slate-700">
                             {recommendation.reorderLevel !== null
                               ? formatNumber(recommendation.reorderLevel)
                               : "-"}
                           </TableCell>
-                          <TableCell className="px-5 py-3.5 text-right tabular-nums">
+                          <TableCell className="px-5 text-right tabular-nums text-slate-700">
                             {recommendation.maximumStockLevel !== null
                               ? formatNumber(recommendation.maximumStockLevel)
                               : "-"}
                           </TableCell>
-                          <TableCell className="px-5 py-3.5">
+                          <TableCell className="px-5">
                             <Badge variant={getStatusBadgeVariant(recommendation.status)}>
                               {getStatusLabel(recommendation.status)}
                             </Badge>

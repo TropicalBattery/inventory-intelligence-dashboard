@@ -11,6 +11,7 @@ import type {
   ProductOption,
   SupplierOption,
 } from "@/lib/types";
+import { SUPPLIER_RELIABILITY_RATINGS } from "@/lib/types";
 
 type ReferenceFormFieldsProps = {
   input: ItemSupplierReferenceInput;
@@ -42,6 +43,12 @@ export function ReferenceFormFields({
   function updateNumericField(
     key:
       | "lead_time_days"
+      | "safety_stock_months"
+      | "qty_in_transit"
+      | "qty_in_bond"
+      | "qty_at_port"
+      | "qty_in_clearing"
+      | "min_order_qty"
       | "pallet_qty"
       | "container_qty"
       | "ordering_cost_per_order"
@@ -136,6 +143,178 @@ export function ReferenceFormFields({
           }
           className={inputClassName}
         />
+      </div>
+
+      <div>
+        <label
+          htmlFor={`${idPrefix}-safety-stock-months`}
+          className="mb-1 block text-xs font-medium text-slate-600"
+        >
+          Safety stock (months)
+        </label>
+        <input
+          id={`${idPrefix}-safety-stock-months`}
+          type="number"
+          min="0"
+          step="any"
+          value={input.safety_stock_months ?? ""}
+          onChange={(event) =>
+            updateNumericField("safety_stock_months", event.target.value)
+          }
+          className={inputClassName}
+          placeholder="3"
+        />
+      </div>
+
+      <div>
+        <label
+          htmlFor={`${idPrefix}-reliability-rating`}
+          className="mb-1 block text-xs font-medium text-slate-600"
+        >
+          Reliability rating
+        </label>
+        <select
+          id={`${idPrefix}-reliability-rating`}
+          value={input.reliability_rating ?? ""}
+          onChange={(event) =>
+            updateField(
+              "reliability_rating",
+              event.target.value
+                ? (event.target.value as ItemSupplierReferenceInput["reliability_rating"])
+                : null
+            )
+          }
+          className={inputClassName}
+        >
+          <option value="">Select rating</option>
+          {SUPPLIER_RELIABILITY_RATINGS.map((rating) => (
+            <option key={rating} value={rating}>
+              {rating}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label
+          htmlFor={`${idPrefix}-supplier-region`}
+          className="mb-1 block text-xs font-medium text-slate-600"
+        >
+          Supplier region
+        </label>
+        <input
+          id={`${idPrefix}-supplier-region`}
+          value={input.supplier_region ?? ""}
+          onChange={(event) =>
+            updateField("supplier_region", event.target.value || null)
+          }
+          placeholder="e.g. Korea, Local"
+          className={inputClassName}
+        />
+      </div>
+
+      <div>
+        <label
+          htmlFor={`${idPrefix}-min-order-qty`}
+          className="mb-1 block text-xs font-medium text-slate-600"
+        >
+          Min order qty
+        </label>
+        <input
+          id={`${idPrefix}-min-order-qty`}
+          type="number"
+          min="0"
+          step="1"
+          value={input.min_order_qty ?? ""}
+          onChange={(event) =>
+            updateNumericField("min_order_qty", event.target.value)
+          }
+          className={inputClassName}
+        />
+      </div>
+
+      <div className="sm:col-span-2 lg:col-span-3">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Pipeline stock (manual until GP sync)
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div>
+            <label
+              htmlFor={`${idPrefix}-qty-in-transit`}
+              className="mb-1 block text-xs font-medium text-slate-600"
+            >
+              In transit
+            </label>
+            <input
+              id={`${idPrefix}-qty-in-transit`}
+              type="number"
+              min="0"
+              step="1"
+              value={input.qty_in_transit ?? ""}
+              onChange={(event) =>
+                updateNumericField("qty_in_transit", event.target.value)
+              }
+              className={inputClassName}
+            />
+          </div>
+          <div>
+            <label
+              htmlFor={`${idPrefix}-qty-in-bond`}
+              className="mb-1 block text-xs font-medium text-slate-600"
+            >
+              In bond
+            </label>
+            <input
+              id={`${idPrefix}-qty-in-bond`}
+              type="number"
+              min="0"
+              step="1"
+              value={input.qty_in_bond ?? ""}
+              onChange={(event) =>
+                updateNumericField("qty_in_bond", event.target.value)
+              }
+              className={inputClassName}
+            />
+          </div>
+          <div>
+            <label
+              htmlFor={`${idPrefix}-qty-at-port`}
+              className="mb-1 block text-xs font-medium text-slate-600"
+            >
+              At port
+            </label>
+            <input
+              id={`${idPrefix}-qty-at-port`}
+              type="number"
+              min="0"
+              step="1"
+              value={input.qty_at_port ?? ""}
+              onChange={(event) =>
+                updateNumericField("qty_at_port", event.target.value)
+              }
+              className={inputClassName}
+            />
+          </div>
+          <div>
+            <label
+              htmlFor={`${idPrefix}-qty-in-clearing`}
+              className="mb-1 block text-xs font-medium text-slate-600"
+            >
+              In clearing
+            </label>
+            <input
+              id={`${idPrefix}-qty-in-clearing`}
+              type="number"
+              min="0"
+              step="1"
+              value={input.qty_in_clearing ?? ""}
+              onChange={(event) =>
+                updateNumericField("qty_in_clearing", event.target.value)
+              }
+              className={inputClassName}
+            />
+          </div>
+        </div>
       </div>
 
       <div>
@@ -296,6 +475,14 @@ export function emptyReferenceInput(): ItemSupplierReferenceInput {
     supplier_external_id: "",
     vendor_item_number: null,
     lead_time_days: null,
+    safety_stock_months: null,
+    qty_in_transit: null,
+    qty_in_bond: null,
+    qty_at_port: null,
+    qty_in_clearing: null,
+    reliability_rating: null,
+    supplier_region: null,
+    min_order_qty: null,
     pallet_qty: null,
     container_qty: null,
     is_priority_vendor: false,
@@ -315,6 +502,14 @@ export function rowToReferenceInput(
     supplier_external_id: row.supplier_external_id,
     vendor_item_number: row.vendor_item_number,
     lead_time_days: row.lead_time_days,
+    safety_stock_months: row.safety_stock_months,
+    qty_in_transit: row.qty_in_transit,
+    qty_in_bond: row.qty_in_bond,
+    qty_at_port: row.qty_at_port,
+    qty_in_clearing: row.qty_in_clearing,
+    reliability_rating: row.reliability_rating,
+    supplier_region: row.supplier_region,
+    min_order_qty: row.min_order_qty,
     pallet_qty: row.pallet_qty,
     container_qty: row.container_qty,
     is_priority_vendor: row.is_priority_vendor,

@@ -6,6 +6,7 @@ import {
   buildVelocityDiagnosticMap,
   getVelocityRowsBySku,
 } from "@/lib/queries/velocity";
+import { getSeasonalityProfilesBySku } from "@/lib/seasonality/service";
 
 function ReorderPageFallback() {
   return (
@@ -26,6 +27,9 @@ export default async function ReorderPage() {
     recommendations,
     velocityBySku
   );
+  const seasonalityBySku = await getSeasonalityProfilesBySku(
+    classified.reorderAction.map((rec) => rec.sku)
+  );
 
   return (
     <Suspense fallback={<ReorderPageFallback />}>
@@ -33,6 +37,7 @@ export default async function ReorderPage() {
         classified={classified}
         diagnosticsBySku={Object.fromEntries(diagnosticsBySku.entries())}
         velocityBySku={Object.fromEntries(velocityBySku.entries())}
+        seasonalityBySku={Object.fromEntries(seasonalityBySku.entries())}
       />
     </Suspense>
   );

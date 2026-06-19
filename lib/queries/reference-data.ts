@@ -1,4 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
+import {
+  appendMissingSupplierPlaceholderRows,
+  resolveSingleSkuForSupplierComparison,
+} from "@/lib/reference-data/placeholder-rows";
 import { TENANT_ID } from "@/lib/tenant";
 import {
   REFERENCE_DATA_PAGE_SIZE,
@@ -121,7 +125,29 @@ export async function getReferenceDataPage(
 
   const references = (referencesResult.data ?? []) as ItemSupplierReference[];
   const joinedRows = joinReferenceRows(references, products, suppliers);
-  const filteredRows = filterRows(joinedRows, search);
+  let filteredRows = filterRows(joinedRows, search);
+
+  const comparisonSku = resolveSingleSkuForSupplierComparison(
+    search,
+    products,
+    filteredRows
+  );
+  if (comparisonSku) {
+    const exactProduct = products.find(
+      (product) => product.sku.toLowerCase() === search.trim().toLowerCase()
+    );
+    if (exactProduct) {
+      filteredRows = joinedRows.filter((row) => row.sku === exactProduct.sku);
+    }
+
+    filteredRows = appendMissingSupplierPlaceholderRows(
+      filteredRows,
+      comparisonSku,
+      products,
+      suppliers
+    );
+  }
+
   const totalCount = filteredRows.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
   const currentPage = Math.min(safePage, totalPages);

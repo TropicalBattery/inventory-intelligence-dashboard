@@ -1,10 +1,12 @@
 import { DashboardBottomSection } from "@/components/dashboard/dashboard-bottom-section";
 import { DashboardCharts } from "@/components/dashboard/dashboard-charts";
 import { DashboardMetricCards } from "@/components/dashboard/dashboard-metric-cards";
+import { SeasonalIntelligenceCard } from "@/components/dashboard/seasonal-intelligence-card";
 import { getRecentSyncRuns } from "@/lib/queries/connector-health";
 import { getDashboardData } from "@/lib/queries/dashboard";
 import { getPurchaseOrderList } from "@/lib/queries/purchase-orders";
 import { getReorderRecommendations } from "@/lib/queries/reorder";
+import { getLatestSeasonalIntelligence } from "@/lib/seasonality/service";
 import {
   formatRelativeTimeShort,
   getSyncAgeTone,
@@ -96,11 +98,13 @@ function buildCriticalItems(recommendations: ReorderRecommendation[]) {
 }
 
 export default async function DashboardPage() {
-  const [data, recommendations, orders, syncRuns] = await Promise.all([
+  const [data, recommendations, orders, syncRuns, seasonalIntelligence] =
+    await Promise.all([
     getDashboardData(),
     getReorderRecommendations(),
     getPurchaseOrderList(),
     getRecentSyncRuns(),
+    getLatestSeasonalIntelligence(),
   ]);
 
   const criticalCount = recommendations.filter(
@@ -115,6 +119,8 @@ export default async function DashboardPage() {
         itemsBelowReorderLevel={data.itemsBelowReorderLevel}
         criticalCount={criticalCount}
       />
+
+      <SeasonalIntelligenceCard initialRecord={seasonalIntelligence} />
 
       <DashboardCharts
         statusData={buildStatusData(recommendations)}

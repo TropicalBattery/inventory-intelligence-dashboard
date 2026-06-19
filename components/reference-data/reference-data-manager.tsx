@@ -18,6 +18,8 @@ import {
   rowToReferenceInput,
   validateBeforeSubmit,
 } from "@/components/reference-data/reference-form-fields";
+import { isPlaceholderReferenceRow } from "@/lib/reference-data/placeholder-rows";
+import { NO_QUOTE_ON_FILE_LABEL } from "@/lib/suppliers/no-quote";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -83,6 +85,11 @@ function updateNumericField(
   input: ItemSupplierReferenceInput,
   key:
     | "lead_time_days"
+    | "safety_stock_months"
+    | "qty_in_transit"
+    | "qty_in_bond"
+    | "qty_at_port"
+    | "qty_in_clearing"
     | "pallet_qty"
     | "container_qty"
     | "ordering_cost_per_order"
@@ -132,10 +139,22 @@ export function ReferenceDataManager({
     );
   }
 
-  function openAddModal() {
-    setAddInput(emptyReferenceInput());
+  function openAddModalForRow(row?: ItemSupplierReferenceRow) {
+    if (row && isPlaceholderReferenceRow(row)) {
+      setAddInput({
+        ...emptyReferenceInput(),
+        sku: row.sku,
+        supplier_external_id: row.supplier_external_id,
+      });
+    } else {
+      setAddInput(emptyReferenceInput());
+    }
     setErrorMessage(null);
     setShowAddModal(true);
+  }
+
+  function openAddModal() {
+    openAddModalForRow();
   }
 
   function closeAddModal() {
@@ -300,7 +319,7 @@ export function ReferenceDataManager({
         </Card>
       ) : (
         <div className="overflow-x-auto">
-        <Table containerClassName="min-w-[72rem]">
+        <Table containerClassName="min-w-[88rem]">
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead>SKU</TableHead>
@@ -308,6 +327,11 @@ export function ReferenceDataManager({
               <TableHead>Supplier</TableHead>
               <TableHead>Vendor #</TableHead>
               <TableHead className="text-right">Lead time</TableHead>
+              <TableHead className="text-right">Safety mo.</TableHead>
+              <TableHead className="text-right">Transit</TableHead>
+              <TableHead className="text-right">Bond</TableHead>
+              <TableHead className="text-right">Port</TableHead>
+              <TableHead className="text-right">Clearing</TableHead>
               <TableHead className="text-right">Pallet</TableHead>
               <TableHead className="text-right">Container</TableHead>
               <TableHead>Priority</TableHead>
@@ -321,6 +345,7 @@ export function ReferenceDataManager({
           <TableBody>
             {rows.map((row) => {
               const isEditing = editingId === row.id;
+              const isMissingQuote = isPlaceholderReferenceRow(row);
 
               if (isEditing) {
                 return (
@@ -376,6 +401,51 @@ export function ReferenceDataManager({
                         className={`${inlineInputClassName} text-right`}
                       />
                     </TableCell>
+                    <TableCell>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={editInput.safety_stock_months ?? ""}
+                        onChange={(event) =>
+                          setEditInput(
+                            updateNumericField(
+                              editInput,
+                              "safety_stock_months",
+                              event.target.value
+                            )
+                          )
+                        }
+                        className={`${inlineInputClassName} text-right`}
+                      />
+                    </TableCell>
+                    {(
+                      [
+                        "qty_in_transit",
+                        "qty_in_bond",
+                        "qty_at_port",
+                        "qty_in_clearing",
+                      ] as const
+                    ).map((field) => (
+                      <TableCell key={field}>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={editInput[field] ?? ""}
+                          onChange={(event) =>
+                            setEditInput(
+                              updateNumericField(
+                                editInput,
+                                field,
+                                event.target.value
+                              )
+                            )
+                          }
+                          className={`${inlineInputClassName} text-right`}
+                        />
+                      </TableCell>
+                    ))}
                     <TableCell>
                       <input
                         type="number"
@@ -520,7 +590,10 @@ export function ReferenceDataManager({
               }
 
               return (
-                <TableRow key={row.id}>
+                <TableRow
+                  key={row.id}
+                  className={isMissingQuote ? "bg-slate-50/80" : undefined}
+                >
                   <TableCell className="font-medium text-slate-900">
                     {row.sku}
                   </TableCell>
@@ -528,61 +601,148 @@ export function ReferenceDataManager({
                   <TableCell>
                     {row.supplier_name ?? row.supplier_external_id}
                   </TableCell>
-                  <TableCell>{row.vendor_item_number ?? "-"}</TableCell>
-                  <TableCell className="text-right">
-                    {formatOptionalNumber(row.lead_time_days)}
+                  <TableCell>
+                    {isMissingQuote ? (
+                      <span className="text-slate-400">-</span>
+                    ) : (
+                      (row.vendor_item_number ?? "-")
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatOptionalNumber(row.pallet_qty)}
+                    {isMissingQuote ? (
+                      <span className="text-slate-400">-</span>
+                    ) : (
+                      formatOptionalNumber(row.lead_time_days)
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatOptionalNumber(row.container_qty)}
+                    {isMissingQuote ? (
+                      <span className="text-slate-400">-</span>
+                    ) : (
+                      formatOptionalNumber(row.safety_stock_months)
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {isMissingQuote ? (
+                      <span className="text-slate-400">-</span>
+                    ) : (
+                      formatOptionalNumber(row.qty_in_transit)
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {isMissingQuote ? (
+                      <span className="text-slate-400">-</span>
+                    ) : (
+                      formatOptionalNumber(row.qty_in_bond)
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {isMissingQuote ? (
+                      <span className="text-slate-400">-</span>
+                    ) : (
+                      formatOptionalNumber(row.qty_at_port)
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {isMissingQuote ? (
+                      <span className="text-slate-400">-</span>
+                    ) : (
+                      formatOptionalNumber(row.qty_in_clearing)
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {isMissingQuote ? (
+                      <span className="text-slate-400">-</span>
+                    ) : (
+                      formatOptionalNumber(row.pallet_qty)
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {isMissingQuote ? (
+                      <span className="text-slate-400">-</span>
+                    ) : (
+                      formatOptionalNumber(row.container_qty)
+                    )}
                   </TableCell>
                   <TableCell>
-                    <PriorityVendorBadge isPriority={row.is_priority_vendor} />
+                    {isMissingQuote ? (
+                      <span className="text-slate-400">-</span>
+                    ) : (
+                      <PriorityVendorBadge isPriority={row.is_priority_vendor} />
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatOptionalCurrency(row.ordering_cost_per_order)}
+                    {isMissingQuote ? (
+                      <span className="text-slate-400">-</span>
+                    ) : (
+                      formatOptionalCurrency(row.ordering_cost_per_order)
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatOptionalCurrency(row.holding_cost_per_unit_year)}
+                    {isMissingQuote ? (
+                      <span className="text-slate-400">-</span>
+                    ) : (
+                      formatOptionalCurrency(row.holding_cost_per_unit_year)
+                    )}
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatOptionalCurrency(row.unit_price)}
+                    {isMissingQuote ? (
+                      <span className="text-sm text-slate-500 italic">
+                        {NO_QUOTE_ON_FILE_LABEL}
+                      </span>
+                    ) : (
+                      formatOptionalCurrency(row.unit_price)
+                    )}
                   </TableCell>
                   <TableCell className="max-w-[12rem] truncate">
-                    {row.notes ?? "-"}
+                    {isMissingQuote ? (
+                      <span className="text-slate-400">-</span>
+                    ) : (
+                      (row.notes ?? "-")
+                    )}
                   </TableCell>
                   <TableCell>
-                    <div className="flex items-center justify-end gap-1">
-                      <button
-                        type="button"
-                        onClick={() => startEditing(row)}
-                        className={`group ${editActionClassName}`}
-                        title="Edit row"
-                        aria-label={`Edit ${row.sku}`}
-                      >
-                        <i
-                          className="ti ti-pencil text-[16px] transition-transform duration-200 group-hover:-rotate-12"
-                          aria-hidden="true"
-                        />
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isPending}
-                        onClick={() =>
-                          handleDelete(row.id, row.sku, row.supplier_name)
-                        }
-                        className={`group ${deleteActionClassName}`}
-                        title="Delete row"
-                        aria-label={`Delete ${row.sku}`}
-                      >
-                        <i
-                          className="ti ti-trash text-[16px] transition-transform duration-200 group-hover:scale-110"
-                          aria-hidden="true"
-                        />
-                      </button>
-                    </div>
+                    {isMissingQuote ? (
+                      <div className="flex items-center justify-end">
+                        <button
+                          type="button"
+                          onClick={() => openAddModalForRow(row)}
+                          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:border-tbc-red hover:text-tbc-red"
+                        >
+                          Add quote
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          type="button"
+                          onClick={() => startEditing(row)}
+                          className={`group ${editActionClassName}`}
+                          title="Edit row"
+                          aria-label={`Edit ${row.sku}`}
+                        >
+                          <i
+                            className="ti ti-pencil text-[16px] transition-transform duration-200 group-hover:-rotate-12"
+                            aria-hidden="true"
+                          />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isPending}
+                          onClick={() =>
+                            handleDelete(row.id, row.sku, row.supplier_name)
+                          }
+                          className={`group ${deleteActionClassName}`}
+                          title="Delete row"
+                          aria-label={`Delete ${row.sku}`}
+                        >
+                          <i
+                            className="ti ti-trash text-[16px] transition-transform duration-200 group-hover:scale-110"
+                            aria-hidden="true"
+                          />
+                        </button>
+                      </div>
+                    )}
                   </TableCell>
                 </TableRow>
               );

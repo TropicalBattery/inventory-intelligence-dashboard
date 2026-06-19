@@ -1,3 +1,14 @@
+export type SupplierReliabilityRating =
+  | "Preferred"
+  | "Approved"
+  | "Conditional";
+
+export const SUPPLIER_RELIABILITY_RATINGS: SupplierReliabilityRating[] = [
+  "Preferred",
+  "Approved",
+  "Conditional",
+];
+
 export type ItemSupplierReference = {
   id: string;
   tenant_id: string;
@@ -5,6 +16,11 @@ export type ItemSupplierReference = {
   supplier_external_id: string;
   vendor_item_number: string | null;
   lead_time_days: number | null;
+  safety_stock_months: number | null;
+  qty_in_transit: number | null;
+  qty_in_bond: number | null;
+  qty_at_port: number | null;
+  qty_in_clearing: number | null;
   pallet_qty: number | null;
   container_qty: number | null;
   is_priority_vendor: boolean;
@@ -12,6 +28,9 @@ export type ItemSupplierReference = {
   holding_cost_per_unit_year: number | null;
   unit_price: number | null;
   currency: string | null;
+  reliability_rating: SupplierReliabilityRating | null;
+  supplier_region: string | null;
+  min_order_qty: number | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -22,6 +41,11 @@ export type ItemSupplierReferenceInput = {
   supplier_external_id: string;
   vendor_item_number: string | null;
   lead_time_days: number | null;
+  safety_stock_months: number | null;
+  qty_in_transit: number | null;
+  qty_in_bond: number | null;
+  qty_at_port: number | null;
+  qty_in_clearing: number | null;
   pallet_qty: number | null;
   container_qty: number | null;
   is_priority_vendor: boolean;
@@ -29,12 +53,16 @@ export type ItemSupplierReferenceInput = {
   holding_cost_per_unit_year: number | null;
   unit_price: number | null;
   currency: string;
+  reliability_rating: SupplierReliabilityRating | null;
+  supplier_region: string | null;
+  min_order_qty: number | null;
   notes: string | null;
 };
 
 export type ItemSupplierReferenceRow = ItemSupplierReference & {
   product_name: string | null;
   supplier_name: string | null;
+  hasQuoteOnFile?: boolean;
 };
 
 export type ProductOption = {
@@ -56,6 +84,12 @@ export const REFERENCE_DATA_PAGE_SIZE = 50;
 
 export const NUMERIC_REFERENCE_FIELDS = [
   "lead_time_days",
+  "safety_stock_months",
+  "qty_in_transit",
+  "qty_in_bond",
+  "qty_at_port",
+  "qty_in_clearing",
+  "min_order_qty",
   "pallet_qty",
   "container_qty",
   "ordering_cost_per_order",
@@ -77,6 +111,8 @@ export type VwReorderInputsRow = {
   category: string | null;
   quantity_on_hand: number | null;
   quantity_available: number | null;
+  quantity_allocated: number | null;
+  effective_available: number | null;
   quantity_on_order: number | null;
   quantity_in_transit: number | null;
   quantity_in_bond: number | null;
@@ -92,6 +128,7 @@ export type VwReorderInputsRow = {
   best_supplier_external_id: string | null;
   best_unit_price: number | null;
   lead_time_days: number | null;
+  safety_stock_months: number | null;
   pallet_qty: number | null;
   container_qty: number | null;
 };
@@ -105,6 +142,8 @@ export type ReorderRecommendation = {
   isActive: boolean | null;
   quantityOnHand: number;
   quantityAvailable: number;
+  quantityAllocated: number;
+  effectiveAvailable: number;
   quantityOnOrder: number;
   quantityInPipeline: number;
   pipelineBreakdown: {
@@ -142,11 +181,17 @@ export type ReorderRecommendation = {
 
 export type SupplierReference = {
   supplierExternalId: string;
+  supplierName: string | null;
   unitPrice: number | null;
   leadTimeDays: number | null;
   isPriorityVendor: boolean;
   vendorItemNumber: string | null;
   currency: string;
+  reliabilityRating: SupplierReliabilityRating | null;
+  supplierRegion: string | null;
+  minOrderQty: number | null;
+  notes: string | null;
+  hasQuoteOnFile?: boolean;
 };
 
 export type SuggestedQtyInput = {

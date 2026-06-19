@@ -1,12 +1,17 @@
 import {
   isPrimarySiteBalanceRow,
 } from "@/lib/inventory/primary-site-levels";
+import { sortSupplierReferencesForComparison } from "@/lib/suppliers/sort-supplier-references";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAllPages } from "@/lib/supabase/paginate";
 import { toNumber } from "@/lib/format";
 import { TENANT_ID } from "@/lib/tenant";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { SupplierReference, VwReorderInputsRow } from "@/lib/types";
+import type {
+  SupplierReference,
+  SupplierReliabilityRating,
+  VwReorderInputsRow,
+} from "@/lib/types";
 
 type ProductRow = {
   sku: string | null;
@@ -57,6 +62,11 @@ type SupplierReferenceRow = {
   sku: string;
   supplier_external_id: string;
   lead_time_days: number | string | null;
+  safety_stock_months: number | string | null;
+  qty_in_transit: number | string | null;
+  qty_in_bond: number | string | null;
+  qty_at_port: number | string | null;
+  qty_in_clearing: number | string | null;
   pallet_qty: number | string | null;
   container_qty: number | string | null;
   is_priority_vendor: boolean | null;
@@ -236,7 +246,7 @@ async function fetchBestSupplierReferenceBySku(
     const { data, error } = await supabase
       .from("item_supplier_reference")
       .select(
-        "sku, supplier_external_id, lead_time_days, pallet_qty, container_qty, is_priority_vendor, ordering_cost_per_order, holding_cost_per_unit_year, unit_price"
+        "sku, supplier_external_id, lead_time_days, safety_stock_months, qty_in_transit, qty_in_bond, qty_at_port, qty_in_clearing, pallet_qty, container_qty, is_priority_vendor, ordering_cost_per_order, holding_cost_per_unit_year, unit_price"
       )
       .eq("tenant_id", TENANT_ID)
       .order("sku", { ascending: true })
@@ -298,6 +308,28 @@ function buildReorderInputRow(
 
   const icOrderingCost = costing?.ordering_cost_per_order ?? null;
   const icHoldingCost = costing?.holding_cost_per_unit_year ?? null;
+  const refInTransit =
+    supplier?.qty_in_transit != null ? toNumber(supplier.qty_in_transit) : 0;
+  const refInBond =
+    supplier?.qty_in_bond != null ? toNumber(supplier.qty_in_bond) : 0;
+  const refAtPort =
+    supplier?.qty_at_port != null ? toNumber(supplier.qty_at_port) : 0;
+  const refInClearing =
+    supplier?.qty_in_clearing != null ? toNumber(supplier.qty_in_clearing) : 0;
+  const quantityOnHand = inv.quantity_on_hand;
+  const quantityAvailable = inv.quantity_available;
+  const quantityAllocated = quantityOnHand - quantityAvailable;
+  const quantityInTransit = inv.quantity_in_transit + refInTransit;
+  const quantityInBond = inv.quantity_in_bond + refInBond;
+  const quantityAtPort = inv.quantity_at_port + refAtPort;
+  const quantityInClearing = inv.quantity_in_clearing + refInClearing;
+  const effectiveAvailable =
+    quantityOnHand -
+    quantityAllocated +
+    quantityInTransit +
+    quantityInBond +
+    quantityAtPort +
+    quantityInClearing;
 
   return {
     tenant_id: TENANT_ID,
@@ -305,13 +337,15 @@ function buildReorderInputRow(
     name: product.name,
     item_class: product.item_class,
     category: product.category,
-    quantity_on_hand: inv.quantity_on_hand,
-    quantity_available: inv.quantity_available,
+    quantity_on_hand: quantityOnHand,
+    quantity_available: quantityAvailable,
+    quantity_allocated: quantityAllocated,
+    effective_available: effectiveAvailable,
     quantity_on_order: inv.quantity_on_order,
-    quantity_in_transit: inv.quantity_in_transit,
-    quantity_in_bond: inv.quantity_in_bond,
-    quantity_at_port: inv.quantity_at_port,
-    quantity_in_clearing: inv.quantity_in_clearing,
+    quantity_in_transit: quantityInTransit,
+    quantity_in_bond: quantityInBond,
+    quantity_at_port: quantityAtPort,
+    quantity_in_clearing: quantityInClearing,
     reorder_level: inv.reorder_level,
     maximum_stock_level: inv.maximum_stock_level,
     annual_demand_units: costing?.annual_demand_units
@@ -341,6 +375,10 @@ function buildReorderInputRow(
     lead_time_days:
       supplier?.lead_time_days != null
         ? toNumber(supplier.lead_time_days)
+        : null,
+    safety_stock_months:
+      supplier?.safety_stock_months != null
+        ? toNumber(supplier.safety_stock_months)
         : null,
     pallet_qty:
       supplier?.pallet_qty != null ? toNumber(supplier.pallet_qty) : null,
@@ -425,7 +463,7 @@ export async function fetchReorderInputRowBySku(
     supabase
       .from("item_supplier_reference")
       .select(
-        "sku, supplier_external_id, lead_time_days, pallet_qty, container_qty, is_priority_vendor, ordering_cost_per_order, holding_cost_per_unit_year, unit_price"
+        "sku, supplier_external_id, lead_time_days, safety_stock_months, qty_in_transit, qty_in_bond, qty_at_port, qty_in_clearing, pallet_qty, container_qty, is_priority_vendor, ordering_cost_per_order, holding_cost_per_unit_year, unit_price"
       )
       .eq("tenant_id", TENANT_ID)
       .eq("sku", sku),
@@ -511,25 +549,30 @@ type ItemSupplierReferenceQueryRow = {
   is_priority_vendor: boolean | null;
   vendor_item_number: string | null;
   currency: string | null;
+  reliability_rating: string | null;
+  supplier_region: string | null;
+  min_order_qty: number | string | null;
+  notes: string | null;
 };
 
 function sortSupplierReferences(
   suppliers: SupplierReference[]
 ): SupplierReference[] {
-  return [...suppliers].sort((left, right) => {
-    if (left.isPriorityVendor !== right.isPriorityVendor) {
-      return left.isPriorityVendor ? -1 : 1;
-    }
+  return sortSupplierReferencesForComparison(suppliers);
+}
 
-    const leftPrice = left.unitPrice ?? Number.POSITIVE_INFINITY;
-    const rightPrice = right.unitPrice ?? Number.POSITIVE_INFINITY;
+function parseReliabilityRating(
+  value: string | null | undefined
+): SupplierReliabilityRating | null {
+  if (
+    value === "Preferred" ||
+    value === "Approved" ||
+    value === "Conditional"
+  ) {
+    return value;
+  }
 
-    if (leftPrice !== rightPrice) {
-      return leftPrice - rightPrice;
-    }
-
-    return left.supplierExternalId.localeCompare(right.supplierExternalId);
-  });
+  return null;
 }
 
 function mapItemSupplierReferenceRow(
@@ -537,6 +580,7 @@ function mapItemSupplierReferenceRow(
 ): SupplierReference {
   return {
     supplierExternalId: row.supplier_external_id,
+    supplierName: null,
     unitPrice:
       row.unit_price !== null && row.unit_price !== undefined
         ? toNumber(row.unit_price)
@@ -548,6 +592,14 @@ function mapItemSupplierReferenceRow(
     isPriorityVendor: Boolean(row.is_priority_vendor),
     vendorItemNumber: row.vendor_item_number,
     currency: row.currency ?? "JMD",
+    reliabilityRating: parseReliabilityRating(row.reliability_rating),
+    supplierRegion: row.supplier_region ?? null,
+    minOrderQty:
+      row.min_order_qty !== null && row.min_order_qty !== undefined
+        ? toNumber(row.min_order_qty)
+        : null,
+    notes: row.notes ?? null,
+    hasQuoteOnFile: true,
   };
 }
 

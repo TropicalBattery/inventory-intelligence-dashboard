@@ -16,12 +16,6 @@ function isPositiveNumber(value: number | null | undefined): value is number {
   return value !== null && value !== undefined && value > 0;
 }
 
-function isNonNegativeNumber(
-  value: number | null | undefined
-): value is number {
-  return value !== null && value !== undefined && value >= 0;
-}
-
 function roundToTwoDecimals(value: number): number {
   return Math.round(value * 100) / 100;
 }
@@ -43,8 +37,21 @@ export function calculateEOQ(
   return roundToTwoDecimals(eoq);
 }
 
+/** Lead time at or above this threshold uses months-of-demand safety stock. */
+export const FOREIGN_SUPPLIER_LEAD_TIME_THRESHOLD_DAYS = 60;
+
+/** Default months of demand held as safety stock for foreign suppliers. */
+export const DEFAULT_SAFETY_STOCK_MONTHS = 3;
+
+/** Average days per month for converting daily demand to monthly. */
+export const DAYS_PER_MONTH = 30.44;
+
 /**
- * Simple pilot safety stock: 50% of lead-time demand.
+ * Pilot safety stock:
+ * - Foreign/overseas suppliers (lead time >= 60 days):
+ *   avg_monthly_demand * safety_stock_months (default 3, configurable per supplier)
+ * - Local suppliers (lead time < 60 days):
+ *   50% of lead-time demand (avg_daily_demand * lead_time_days * 0.5)
  *
  * Future enhancement: when demandStdDev and serviceLevelZ are provided, use
  * safetyStock = serviceLevelZ * demandStdDev * sqrt(leadTimeDays) instead of
@@ -54,7 +61,8 @@ export function calculateSafetyStock(
   avgDailyDemand: number | null,
   leadTimeDays: number | null,
   demandStdDev?: number | null,
-  serviceLevelZ?: number | null
+  serviceLevelZ?: number | null,
+  safetyStockMonths?: number | null
 ): number | null {
   if (demandStdDev != null && serviceLevelZ != null && isPositiveNumber(leadTimeDays)) {
     return roundToTwoDecimals(
@@ -66,20 +74,26 @@ export function calculateSafetyStock(
     return null;
   }
 
+  if (leadTimeDays >= FOREIGN_SUPPLIER_LEAD_TIME_THRESHOLD_DAYS) {
+    const months = isPositiveNumber(safetyStockMonths)
+      ? safetyStockMonths
+      : DEFAULT_SAFETY_STOCK_MONTHS;
+    const avgMonthlyDemand = avgDailyDemand * DAYS_PER_MONTH;
+    return roundToTwoDecimals(avgMonthlyDemand * months);
+  }
+
   return roundToTwoDecimals(avgDailyDemand * leadTimeDays * 0.5);
 }
 
 export function calculateROP(
   avgDailyDemand: number | null,
-  leadTimeDays: number | null,
-  safetyStock: number | null
+  leadTimeDays: number | null
 ): number | null {
   if (!isPositiveNumber(avgDailyDemand) || !isPositiveNumber(leadTimeDays)) {
     return null;
   }
 
-  const stockComponent = isNonNegativeNumber(safetyStock) ? safetyStock : 0;
-  return roundToTwoDecimals(avgDailyDemand * leadTimeDays + stockComponent);
+  return roundToTwoDecimals(avgDailyDemand * leadTimeDays);
 }
 
 export function hasMeaningfulSuggestedQtyBasis(
@@ -307,6 +321,16 @@ export function buildReorderRecommendation(
 
   const quantityOnHand = row.quantity_on_hand ?? 0;
   const quantityAvailable = row.quantity_available ?? 0;
+  const quantityAllocated =
+    row.quantity_allocated ?? quantityOnHand - quantityAvailable;
+  const effectiveAvailable =
+    row.effective_available ??
+    quantityOnHand -
+      quantityAllocated +
+      (row.quantity_in_transit ?? 0) +
+      (row.quantity_in_bond ?? 0) +
+      (row.quantity_at_port ?? 0) +
+      (row.quantity_in_clearing ?? 0);
   const quantityOnOrder = row.quantity_on_order ?? 0;
   const pipelineBreakdown = parsePipelineBreakdown(
     row as unknown as Record<string, unknown>
@@ -351,24 +375,23 @@ export function buildReorderRecommendation(
 
   const safetyStock = calculateSafetyStock(
     row.avg_daily_demand_units,
-    leadTimeDays
+    leadTimeDays,
+    undefined,
+    undefined,
+    row.safety_stock_months
   );
 
   if (safetyStock === null && leadTimeDays !== null) {
     dataGaps.push("No avg_daily_demand_units - safety stock not calculated");
   }
 
-  const rop = calculateROP(
-    row.avg_daily_demand_units,
-    leadTimeDays,
-    safetyStock
-  );
+  const rop = calculateROP(row.avg_daily_demand_units, leadTimeDays);
 
   const { suggestedQty: suggestedQtyRaw, dataGaps: suggestedQtyGaps } =
     calculateSuggestedQty({
-      quantityAvailable,
+      quantityAvailable: effectiveAvailable,
       quantityOnOrder,
-      quantityInPipeline,
+      quantityInPipeline: 0,
       rop,
       reorderLevel: row.reorder_level,
       maximumStockLevel: row.maximum_stock_level,
@@ -408,6 +431,8 @@ export function buildReorderRecommendation(
     isActive: null,
     quantityOnHand,
     quantityAvailable,
+    quantityAllocated,
+    effectiveAvailable,
     quantityOnOrder,
     quantityInPipeline,
     pipelineBreakdown,

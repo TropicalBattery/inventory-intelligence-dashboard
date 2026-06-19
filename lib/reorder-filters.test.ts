@@ -18,6 +18,8 @@ function makeRec(
     isActive: true,
     quantityOnHand: 0,
     quantityAvailable: 0,
+    quantityAllocated: 0,
+    effectiveAvailable: 0,
     quantityOnOrder: 0,
     quantityInPipeline: 0,
     pipelineBreakdown: {

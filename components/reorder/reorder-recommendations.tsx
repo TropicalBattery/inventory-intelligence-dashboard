@@ -19,17 +19,20 @@ import type {
   VelocityDiagnostic,
   VwSalesVelocityRow,
 } from "@/lib/types";
+import type { ItemSeasonalityProfile } from "@/lib/seasonality/types";
 
 type ReorderRecommendationsProps = {
   classified: ClassifiedReorderRecommendations;
   diagnosticsBySku: Record<string, VelocityDiagnostic>;
   velocityBySku: Record<string, VwSalesVelocityRow>;
+  seasonalityBySku: Record<string, ItemSeasonalityProfile>;
 };
 
 export function ReorderRecommendations({
   classified,
   diagnosticsBySku,
   velocityBySku,
+  seasonalityBySku,
 }: ReorderRecommendationsProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -81,6 +84,7 @@ export function ReorderRecommendations({
             <ReorderActionTab
               recommendations={classified.reorderAction}
               diagnosticsBySku={diagnosticsBySku}
+              seasonalityBySku={seasonalityBySku}
               onAttentionCountChange={handleAttentionCountChange}
             />
           ) : null}

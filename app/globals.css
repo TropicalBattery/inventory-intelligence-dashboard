@@ -23,6 +23,46 @@
     --text-muted: #9ca3af;
     --border-default: #e5e7eb;
     --border-subtle: #f3f4f6;
+    --color-border-tertiary: #e5e7eb;
+    --color-background-primary: #ffffff;
+    --color-background-secondary: #f9fafb;
+    --color-text-primary: #111111;
+    --color-text-secondary: #6b7280;
+    --border-radius-md: 8px;
+    --pipeline-effective-bg: #eeedfe;
+    --pipeline-effective-label: #534ab7;
+    --pipeline-effective-value: #3c3489;
+    --seasonal-peak-bg: #faeeda;
+    --seasonal-peak-text: #854f0b;
+    --seasonal-order-bg: #eaf3de;
+    --seasonal-order-text: #3b6d11;
+    --seasonal-today-outline: #4f46e5;
+    --seasonal-immediate-peak-bg: #fcebeb;
+    --seasonal-immediate-peak-text: #a32d2d;
+    --seasonal-immediate-approaching-bg: #faeeda;
+    --seasonal-immediate-approaching-text: #854f0b;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --color-border-tertiary: #374151;
+      --color-background-primary: #111827;
+      --color-background-secondary: #1f2937;
+      --color-text-primary: #f4f4f5;
+      --color-text-secondary: #9ca3af;
+      --pipeline-effective-bg: #2e2860;
+      --pipeline-effective-label: #a99bf5;
+      --pipeline-effective-value: #d4cffc;
+      --seasonal-peak-bg: #3d3018;
+      --seasonal-peak-text: #f5d089;
+      --seasonal-order-bg: #1f3318;
+      --seasonal-order-text: #8bc34a;
+      --seasonal-today-outline: #818cf8;
+      --seasonal-immediate-peak-bg: #3d1f1f;
+      --seasonal-immediate-peak-text: #f5a5a5;
+      --seasonal-immediate-approaching-bg: #3d3018;
+      --seasonal-immediate-approaching-text: #f5d089;
+    }
   }
 
   html {

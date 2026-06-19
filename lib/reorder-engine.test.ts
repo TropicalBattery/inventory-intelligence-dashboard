@@ -19,6 +19,8 @@ function baseRow(overrides: Partial<VwReorderInputsRow> = {}): VwReorderInputsRo
     category: "Batteries",
     quantity_on_hand: 35,
     quantity_available: 20,
+    quantity_allocated: 15,
+    effective_available: 25,
     quantity_on_order: 10,
     quantity_in_transit: 2,
     quantity_in_bond: 1,
@@ -32,6 +34,7 @@ function baseRow(overrides: Partial<VwReorderInputsRow> = {}): VwReorderInputsRo
     best_supplier_external_id: "SUP-1",
     best_unit_price: 95,
     lead_time_days: 7,
+    safety_stock_months: null,
     pallet_qty: 24,
     container_qty: 50,
     ordering_cost_per_order: 100,
@@ -53,8 +56,18 @@ describe("calculateEOQ", () => {
 });
 
 describe("calculateSafetyStock", () => {
-  it("uses the simple 50% lead-time demand buffer", () => {
+  it("uses the simple 50% lead-time demand buffer for local suppliers", () => {
     expect(calculateSafetyStock(10, 7)).toBe(35);
+    expect(calculateSafetyStock(10, 59)).toBe(295);
+  });
+
+  it("uses months of demand for foreign suppliers", () => {
+    expect(calculateSafetyStock(10, 60)).toBeCloseTo(913.2, 1);
+    expect(calculateSafetyStock(10, 90)).toBeCloseTo(913.2, 1);
+  });
+
+  it("honors configurable safety_stock_months for foreign suppliers", () => {
+    expect(calculateSafetyStock(10, 90, null, null, 6)).toBeCloseTo(1826.4, 1);
   });
 
   it("returns null when lead time is missing", () => {
@@ -63,12 +76,13 @@ describe("calculateSafetyStock", () => {
 });
 
 describe("calculateROP", () => {
-  it("combines lead-time demand and safety stock", () => {
-    expect(calculateROP(10, 7, 35)).toBe(105);
+  it("uses lead-time demand only", () => {
+    expect(calculateROP(10, 7)).toBe(70);
+    expect(calculateROP(10, 93)).toBe(930);
   });
 
   it("returns null when lead time is missing", () => {
-    expect(calculateROP(10, null, 35)).toBeNull();
+    expect(calculateROP(10, null)).toBeNull();
   });
 });
 
@@ -312,12 +326,24 @@ describe("buildReorderRecommendation", () => {
 
     expect(recommendation.eoq).toBeCloseTo(346.41, 2);
     expect(recommendation.safetyStock).toBe(35);
-    expect(recommendation.rop).toBe(105);
+    expect(recommendation.rop).toBe(70);
     expect(recommendation.suggestedQtyRaw).toBeCloseTo(346.41, 2);
     expect(recommendation.suggestedQtyRounded).toBe(350);
     expect(recommendation.roundingUnit).toBe("container");
     expect(recommendation.containerCount).toBe(7);
     expect(recommendation.status).toBe("reorder");
+  });
+
+  it("uses months-of-demand safety stock for foreign suppliers", () => {
+    const recommendation = buildReorderRecommendation(
+      baseRow({
+        lead_time_days: 90,
+        safety_stock_months: 3,
+      })
+    );
+
+    expect(recommendation.safetyStock).toBeCloseTo(913.2, 1);
+    expect(recommendation.rop).toBe(900);
   });
 
   it("records EOQ data gaps when ordering or holding cost is missing", () => {
@@ -428,7 +454,10 @@ describe("buildReorderRecommendation", () => {
   it("returns ok status when effective stock is above ROP", () => {
     const recommendation = buildReorderRecommendation(
       baseRow({
+        quantity_on_hand: 100,
         quantity_available: 80,
+        quantity_allocated: 20,
+        effective_available: 90,
         quantity_on_order: 20,
         quantity_in_transit: 10,
         quantity_in_bond: 0,
