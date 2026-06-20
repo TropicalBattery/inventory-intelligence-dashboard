@@ -18,6 +18,7 @@ export const REORDERABLE_CLASSES = [
   "ACC-T-END",
   "ACC-ENG-CO",
   "ACC-DI-WAT",
+  "AP-DI-WAT",
   "ACC-W-WASH",
   "ACC-CABLES",
   "ARMORAL",
@@ -36,9 +37,17 @@ export const REORDERABLE_CLASSES = [
   "VICTRON",
   "MOB-SERV",
   "BAT SERV",
-  "SOL-SERV",
   "E-BIKE",
   "VALVES",
+  "BAT-DRY",
+  "SOL-MOUNT",
+  "SOL-COND",
+  "SOL-BIKE",
+  "T-B-FLUID",
+  "DIST-WATER",
+  "CB-COOL",
+  "IG-TUNING",
+  "DISC-PAD",
 ] as const;
 
 export const NON_STOCK_CLASSES = [
@@ -87,6 +96,18 @@ export const NON_STOCK_CLASSES = [
   "EXT-WARR",
   "COMP",
   "RKT-DI",
+  "TYRE OTHER",
+  "TYRE",
+  "YAM-PRTS",
+  "YAH-SERV",
+  "YAMAHA",
+  "STAT",
+  "TUBES",
+  "TOYOTA-MAT",
+  "SOL-SERV",
+  "ATV",
+  "W-WEIGHTS",
+  "ACC-3M",
 ] as const;
 
 export type NonStockGroupLabel =
@@ -116,11 +137,15 @@ export const NON_STOCK_GROUP_DEFINITIONS: ReadonlyArray<{
       "GY-TUBES",
       "GY-FLAPS",
       "GYR-RUBBER",
+      "TYRE OTHER",
+      "TYRE",
+      "TUBES",
+      "W-WEIGHTS",
     ],
   },
   {
     label: "Raw Materials",
-    classes: ["MATERIALS", "DW-RAW-MAT", "R-MAT-CBF"],
+    classes: ["MATERIALS", "DW-RAW-MAT", "R-MAT-CBF", "TOYOTA-MAT"],
   },
   {
     label: "Oils and Filters",
@@ -128,7 +153,7 @@ export const NON_STOCK_GROUP_DEFINITIONS: ReadonlyArray<{
   },
   {
     label: "Services",
-    classes: ["TYRE SERV.", "SERV", "EXT-WARR", "COMP", "RKT-DI"],
+    classes: ["TYRE SERV.", "SERV", "EXT-WARR", "COMP", "RKT-DI", "YAH-SERV", "SOL-SERV"],
   },
   {
     label: "Scrap/Disposal",
@@ -151,6 +176,11 @@ export const NON_STOCK_GROUP_DEFINITIONS: ReadonlyArray<{
       "PK-DSK-PAD",
       "PURPLE1",
       "CHEVRON",
+      "YAM-PRTS",
+      "YAMAHA",
+      "STAT",
+      "ATV",
+      "ACC-3M",
     ],
   },
 ];

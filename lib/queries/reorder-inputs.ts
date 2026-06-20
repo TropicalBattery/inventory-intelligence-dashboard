@@ -1,6 +1,3 @@
-import {
-  isPrimarySiteBalanceRow,
-} from "@/lib/inventory/primary-site-levels";
 import { sortSupplierReferencesForComparison } from "@/lib/suppliers/sort-supplier-references";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAllPages } from "@/lib/supabase/paginate";
@@ -13,6 +10,98 @@ import type {
   VwReorderInputsRow,
 } from "@/lib/types";
 
+export const VW_REORDER_INPUTS_SELECT =
+  "tenant_id, sku, name, item_class, category, is_active, " +
+  "quantity_on_hand, quantity_available, quantity_allocated, " +
+  "quantity_on_order, quantity_in_transit, quantity_in_bond, " +
+  "quantity_at_port, quantity_in_clearing, effective_available, " +
+  "quantity_in_pipeline, reorder_level, maximum_stock_level, " +
+  "annual_demand_units, avg_daily_demand_units, unit_cost, " +
+  "ic_ordering_cost, ic_holding_cost, supplier_external_id, " +
+  "vendor_item_number, lead_time_days, safety_stock_months, " +
+  "pallet_qty, container_qty, ordering_cost_per_order, " +
+  "holding_cost_per_unit_year, supplier_unit_price, " +
+  "supplier_name, supplier_lead_time_days";
+
+type VwReorderInputsViewRow = {
+  tenant_id: string;
+  sku: string;
+  name: string | null;
+  item_class: string | null;
+  category: string | null;
+  is_active: boolean | null;
+  quantity_on_hand: number | string | null;
+  quantity_available: number | string | null;
+  quantity_allocated: number | string | null;
+  quantity_on_order: number | string | null;
+  quantity_in_transit: number | string | null;
+  quantity_in_bond: number | string | null;
+  quantity_at_port: number | string | null;
+  quantity_in_clearing: number | string | null;
+  effective_available: number | string | null;
+  quantity_in_pipeline: number | string | null;
+  reorder_level: number | string | null;
+  maximum_stock_level: number | string | null;
+  annual_demand_units: number | string | null;
+  avg_daily_demand_units: number | string | null;
+  unit_cost: number | string | null;
+  ic_ordering_cost: number | string | null;
+  ic_holding_cost: number | string | null;
+  supplier_external_id: string | null;
+  vendor_item_number: string | null;
+  lead_time_days: number | string | null;
+  safety_stock_months: number | string | null;
+  pallet_qty: number | string | null;
+  container_qty: number | string | null;
+  ordering_cost_per_order: number | string | null;
+  holding_cost_per_unit_year: number | string | null;
+  supplier_unit_price: number | string | null;
+  supplier_name: string | null;
+  supplier_lead_time_days: number | string | null;
+};
+
+function toNullableNumber(
+  value: number | string | null | undefined
+): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return toNumber(value);
+}
+
+export function mapViewRowToInputRow(row: VwReorderInputsViewRow): VwReorderInputsRow {
+  return {
+    tenant_id: row.tenant_id,
+    sku: row.sku,
+    name: row.name,
+    item_class: row.item_class,
+    category: row.category,
+    quantity_on_hand: toNullableNumber(row.quantity_on_hand),
+    quantity_available: toNullableNumber(row.quantity_available),
+    quantity_allocated: toNullableNumber(row.quantity_allocated),
+    effective_available: toNullableNumber(row.effective_available),
+    quantity_on_order: toNullableNumber(row.quantity_on_order),
+    quantity_in_transit: toNullableNumber(row.quantity_in_transit),
+    quantity_in_bond: toNullableNumber(row.quantity_in_bond),
+    quantity_at_port: toNullableNumber(row.quantity_at_port),
+    quantity_in_clearing: toNullableNumber(row.quantity_in_clearing),
+    reorder_level: toNullableNumber(row.reorder_level),
+    maximum_stock_level: toNullableNumber(row.maximum_stock_level),
+    annual_demand_units: toNullableNumber(row.annual_demand_units),
+    avg_daily_demand_units: toNullableNumber(row.avg_daily_demand_units),
+    ordering_cost_per_order: toNullableNumber(row.ordering_cost_per_order),
+    holding_cost_per_unit_year: toNullableNumber(row.holding_cost_per_unit_year),
+    current_cost_local: toNullableNumber(row.unit_cost),
+    best_supplier_external_id: row.supplier_external_id,
+    best_unit_price: toNullableNumber(row.supplier_unit_price),
+    lead_time_days: toNullableNumber(row.lead_time_days),
+    safety_stock_months: toNullableNumber(row.safety_stock_months),
+    pallet_qty: toNullableNumber(row.pallet_qty),
+    container_qty: toNullableNumber(row.container_qty),
+  };
+}
+
 type ProductRow = {
   sku: string | null;
   name: string | null;
@@ -21,9 +110,8 @@ type ProductRow = {
   external_id: string;
 };
 
-type InventoryBalanceAggregateRow = {
+type MvInventoryAggregateRow = {
   sku: string | null;
-  external_id: string | null;
   quantity_on_hand: number | string | null;
   quantity_available: number | string | null;
   quantity_on_order: number | string | null;
@@ -125,6 +213,20 @@ function isBetterSupplierReference(
   ) < 0;
 }
 
+function mapMvRowToAggregate(row: MvInventoryAggregateRow): SkuInventoryAggregate {
+  return {
+    quantity_on_hand: toNumber(row.quantity_on_hand),
+    quantity_available: toNumber(row.quantity_available),
+    quantity_on_order: toNumber(row.quantity_on_order),
+    quantity_in_transit: toNumber(row.quantity_in_transit),
+    quantity_in_bond: toNumber(row.quantity_in_bond),
+    quantity_at_port: toNumber(row.quantity_at_port),
+    quantity_in_clearing: toNumber(row.quantity_in_clearing),
+    reorder_level: toNumber(row.reorder_level),
+    maximum_stock_level: toNumber(row.maximum_stock_level),
+  };
+}
+
 async function fetchProducts(
   supabase: SupabaseClient
 ): Promise<ProductRow[]> {
@@ -146,53 +248,29 @@ async function fetchInventoryAggregatesBySku(
 ): Promise<Map<string, SkuInventoryAggregate>> {
   const aggregatesBySku = new Map<string, SkuInventoryAggregate>();
 
-  const rows = await fetchAllPages<InventoryBalanceAggregateRow>(
-    async (from, to) => {
-      const { data, error } = await supabase
-        .from("inventory_balances")
-        .select(
-          "sku, external_id, quantity_on_hand, quantity_available, quantity_on_order, quantity_in_transit, quantity_in_bond, quantity_at_port, quantity_in_clearing, reorder_level, maximum_stock_level"
-        )
-        .eq("tenant_id", TENANT_ID)
-        .not("sku", "is", null)
-        .order("sku", { ascending: true })
-        .range(from, to);
+  const rows = await fetchAllPages<MvInventoryAggregateRow>(async (from, to) => {
+    const { data, error } = await supabase
+      .from("mv_inventory_aggregates_by_sku")
+      .select(
+        "sku, quantity_on_hand, quantity_available, quantity_on_order, quantity_in_transit, quantity_in_bond, quantity_at_port, quantity_in_clearing, reorder_level, maximum_stock_level"
+      )
+      .eq("tenant_id", TENANT_ID)
+      .not("sku", "is", null)
+      .order("sku", { ascending: true })
+      .range(from, to);
 
-      return { data, error };
-    }
-  );
+    return {
+      data: data as unknown as MvInventoryAggregateRow[] | null,
+      error,
+    };
+  });
 
   for (const row of rows) {
     if (!row.sku) {
       continue;
     }
 
-    const existing = aggregatesBySku.get(row.sku) ?? {
-      quantity_on_hand: 0,
-      quantity_available: 0,
-      quantity_on_order: 0,
-      quantity_in_transit: 0,
-      quantity_in_bond: 0,
-      quantity_at_port: 0,
-      quantity_in_clearing: 0,
-      reorder_level: 0,
-      maximum_stock_level: 0,
-    };
-
-    existing.quantity_on_hand += toNumber(row.quantity_on_hand);
-    existing.quantity_available += toNumber(row.quantity_available);
-    existing.quantity_on_order += toNumber(row.quantity_on_order);
-    existing.quantity_in_transit += toNumber(row.quantity_in_transit);
-    existing.quantity_in_bond += toNumber(row.quantity_in_bond);
-    existing.quantity_at_port += toNumber(row.quantity_at_port);
-    existing.quantity_in_clearing += toNumber(row.quantity_in_clearing);
-
-    if (isPrimarySiteBalanceRow(row)) {
-      existing.reorder_level = toNumber(row.reorder_level);
-      existing.maximum_stock_level = toNumber(row.maximum_stock_level);
-    }
-
-    aggregatesBySku.set(row.sku, existing);
+    aggregatesBySku.set(row.sku, mapMvRowToAggregate(row));
   }
 
   return aggregatesBySku;
@@ -430,6 +508,158 @@ export async function fetchAllReorderInputRows(
   }
 }
 
+async function fetchInventoryAggregatesForSkus(
+  supabase: SupabaseClient,
+  skus: string[]
+): Promise<Map<string, SkuInventoryAggregate>> {
+  const aggregatesBySku = new Map<string, SkuInventoryAggregate>();
+
+  if (skus.length === 0) {
+    return aggregatesBySku;
+  }
+
+  const { data, error } = await supabase
+    .from("mv_inventory_aggregates_by_sku")
+    .select(
+      "sku, quantity_on_hand, quantity_available, quantity_on_order, quantity_in_transit, quantity_in_bond, quantity_at_port, quantity_in_clearing, reorder_level, maximum_stock_level"
+    )
+    .eq("tenant_id", TENANT_ID)
+    .in("sku", skus);
+
+  if (error) {
+    console.error(
+      "Failed to fetch inventory aggregates for SKUs:",
+      error.message
+    );
+    return aggregatesBySku;
+  }
+
+  for (const row of (data ?? []) as MvInventoryAggregateRow[]) {
+    if (!row.sku) {
+      continue;
+    }
+
+    aggregatesBySku.set(row.sku, mapMvRowToAggregate(row));
+  }
+
+  return aggregatesBySku;
+}
+
+async function fetchBestCostingMapsForSkus(
+  supabase: SupabaseClient,
+  products: ProductRow[]
+): Promise<{
+  bySku: Map<string, ItemCostingRow>;
+  byProductExternalId: Map<string, ItemCostingRow>;
+}> {
+  const bySku = new Map<string, ItemCostingRow>();
+  const byProductExternalId = new Map<string, ItemCostingRow>();
+  const skus = products.map((product) => product.sku).filter(Boolean) as string[];
+  const externalIds = products.map((product) => product.external_id);
+
+  if (skus.length === 0) {
+    return { bySku, byProductExternalId };
+  }
+
+  const orFilter = [
+    `sku.in.(${skus.join(",")})`,
+    `product_external_id.in.(${externalIds.join(",")})`,
+  ].join(",");
+
+  const { data, error } = await supabase
+    .from("item_costing")
+    .select(
+      "sku, product_external_id, annual_demand_units, avg_daily_demand_units, current_cost_local, ordering_cost_per_order, holding_cost_per_unit_year, source_updated_at"
+    )
+    .eq("tenant_id", TENANT_ID)
+    .or(orFilter);
+
+  if (error) {
+    console.error("Failed to fetch item costing for SKUs:", error.message);
+    return { bySku, byProductExternalId };
+  }
+
+  for (const row of (data ?? []) as ItemCostingRow[]) {
+    if (row.sku) {
+      const current = bySku.get(row.sku);
+      if (isNewerCostingRow(row, current)) {
+        bySku.set(row.sku, row);
+      }
+    }
+
+    if (row.product_external_id) {
+      const current = byProductExternalId.get(row.product_external_id);
+      if (isNewerCostingRow(row, current)) {
+        byProductExternalId.set(row.product_external_id, row);
+      }
+    }
+  }
+
+  return { bySku, byProductExternalId };
+}
+
+async function fetchBestSupplierReferenceForSkus(
+  supabase: SupabaseClient,
+  skus: string[]
+): Promise<Map<string, SupplierReferenceRow>> {
+  const bestBySku = new Map<string, SupplierReferenceRow>();
+
+  if (skus.length === 0) {
+    return bestBySku;
+  }
+
+  const { data, error } = await supabase
+    .from("item_supplier_reference")
+    .select(
+      "sku, supplier_external_id, lead_time_days, safety_stock_months, qty_in_transit, qty_in_bond, qty_at_port, qty_in_clearing, pallet_qty, container_qty, is_priority_vendor, ordering_cost_per_order, holding_cost_per_unit_year, unit_price"
+    )
+    .eq("tenant_id", TENANT_ID)
+    .in("sku", skus);
+
+  if (error) {
+    console.error(
+      "Failed to fetch supplier references for SKUs:",
+      error.message
+    );
+    return bestBySku;
+  }
+
+  for (const row of (data ?? []) as SupplierReferenceRow[]) {
+    if (!row.sku) {
+      continue;
+    }
+
+    const current = bestBySku.get(row.sku);
+    if (isBetterSupplierReference(row, current)) {
+      bestBySku.set(row.sku, row);
+    }
+  }
+
+  return bestBySku;
+}
+
+export async function fetchReorderInputRowsPage(
+  from: number,
+  to: number
+): Promise<VwReorderInputsRow[]> {
+  const supabase = createAdminClient();
+
+  const { data, error } = await supabase
+    .from("vw_reorder_inputs")
+    .select(VW_REORDER_INPUTS_SELECT)
+    .eq("tenant_id", TENANT_ID)
+    .order("sku", { ascending: true })
+    .range(from, to);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []).map((row) =>
+    mapViewRowToInputRow(row as unknown as VwReorderInputsViewRow)
+  );
+}
+
 export async function fetchReorderInputRowBySku(
   sku: string,
   supabase: SupabaseClient = createAdminClient()
@@ -445,14 +675,15 @@ export async function fetchReorderInputRowBySku(
     return null;
   }
 
-  const [inventoryRows, costingRows, supplierRows] = await Promise.all([
+  const [inventoryResult, costingRows, supplierRows] = await Promise.all([
     supabase
-      .from("inventory_balances")
+      .from("mv_inventory_aggregates_by_sku")
       .select(
-        "sku, external_id, quantity_on_hand, quantity_available, quantity_on_order, quantity_in_transit, quantity_in_bond, quantity_at_port, quantity_in_clearing, reorder_level, maximum_stock_level"
+        "sku, quantity_on_hand, quantity_available, quantity_on_order, quantity_in_transit, quantity_in_bond, quantity_at_port, quantity_in_clearing, reorder_level, maximum_stock_level"
       )
       .eq("tenant_id", TENANT_ID)
-      .eq("sku", sku),
+      .eq("sku", sku)
+      .maybeSingle(),
     supabase
       .from("item_costing")
       .select(
@@ -469,9 +700,9 @@ export async function fetchReorderInputRowBySku(
       .eq("sku", sku),
   ]);
 
-  const inventory = aggregateInventoryRows(
-    (inventoryRows.data ?? []) as InventoryBalanceAggregateRow[]
-  );
+  const inventory = inventoryResult.data
+    ? mapMvRowToAggregate(inventoryResult.data as MvInventoryAggregateRow)
+    : undefined;
   const costing = pickBestCostingRow(
     (costingRows.data ?? []) as ItemCostingRow[]
   );
@@ -480,39 +711,6 @@ export async function fetchReorderInputRowBySku(
   );
 
   return buildReorderInputRow(product, inventory, costing, supplier);
-}
-
-function aggregateInventoryRows(
-  rows: InventoryBalanceAggregateRow[]
-): SkuInventoryAggregate {
-  const aggregate: SkuInventoryAggregate = {
-    quantity_on_hand: 0,
-    quantity_available: 0,
-    quantity_on_order: 0,
-    quantity_in_transit: 0,
-    quantity_in_bond: 0,
-    quantity_at_port: 0,
-    quantity_in_clearing: 0,
-    reorder_level: 0,
-    maximum_stock_level: 0,
-  };
-
-  for (const row of rows) {
-    aggregate.quantity_on_hand += toNumber(row.quantity_on_hand);
-    aggregate.quantity_available += toNumber(row.quantity_available);
-    aggregate.quantity_on_order += toNumber(row.quantity_on_order);
-    aggregate.quantity_in_transit += toNumber(row.quantity_in_transit);
-    aggregate.quantity_in_bond += toNumber(row.quantity_in_bond);
-    aggregate.quantity_at_port += toNumber(row.quantity_at_port);
-    aggregate.quantity_in_clearing += toNumber(row.quantity_in_clearing);
-
-    if (isPrimarySiteBalanceRow(row)) {
-      aggregate.reorder_level = toNumber(row.reorder_level);
-      aggregate.maximum_stock_level = toNumber(row.maximum_stock_level);
-    }
-  }
-
-  return aggregate;
 }
 
 function pickBestCostingRow(rows: ItemCostingRow[]): ItemCostingRow | undefined {

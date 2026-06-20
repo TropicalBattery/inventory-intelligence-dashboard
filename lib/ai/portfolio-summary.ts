@@ -91,14 +91,23 @@ export function buildPortfolioSummaryPayload(
 ): PortfolioSummaryPayload {
   const statusCounts = recommendations.reduce(
     (counts, rec) => {
-      if (rec.status === "inactive") {
+      if (rec.status === "no_demand") {
         return counts;
       }
 
-      counts[rec.status] += 1;
+      if (rec.status === "critical") {
+        counts.critical += 1;
+      } else if (rec.status === "watch") {
+        counts.watch += 1;
+      } else if (rec.status === "reorder_needed") {
+        counts.reorder += 1;
+      } else if (rec.status === "ok") {
+        counts.ok += 1;
+      }
+
       return counts;
     },
-    { critical: 0, reorder: 0, ok: 0 }
+    { critical: 0, watch: 0, reorder: 0, ok: 0 }
   );
 
   const criticalItems = recommendations
@@ -125,7 +134,7 @@ export function buildPortfolioSummaryPayload(
   const supplierCounts = new Map<string, number>();
 
   for (const rec of recommendations) {
-    if (rec.status !== "critical" && rec.status !== "reorder") {
+    if (rec.status !== "critical" && rec.status !== "watch" && rec.status !== "reorder_needed") {
       continue;
     }
 

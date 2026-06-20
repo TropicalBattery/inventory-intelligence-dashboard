@@ -99,7 +99,12 @@ export const NUMERIC_REFERENCE_FIELDS = [
 
 export type NumericReferenceField = (typeof NUMERIC_REFERENCE_FIELDS)[number];
 
-export type ReorderStatus = "critical" | "reorder" | "ok" | "inactive";
+export type ReorderStatus =
+  | "critical"
+  | "watch"
+  | "reorder_needed"
+  | "ok"
+  | "no_demand";
 
 export type RoundingUnit = "container" | "pallet" | "unit";
 

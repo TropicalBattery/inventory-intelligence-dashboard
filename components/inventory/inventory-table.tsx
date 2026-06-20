@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Fragment, useMemo, useState } from "react";
 import { Package, Search } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
@@ -16,35 +17,46 @@ import {
 } from "@/components/ui/Table";
 import { formatNumber } from "@/lib/format";
 import {
-  countInactiveRecommendations,
-} from "@/lib/reorder-filters";
-import {
   getStatusBadgeVariant,
   getStatusLabel,
 } from "@/lib/reorder-status-ui";
 import type {
   InventoryItem,
   InventoryLocationBalance,
+  InventoryStats,
 } from "@/lib/queries/inventory";
 import type { ReorderStatus } from "@/lib/types";
 
 type InventoryTableProps = {
   items: InventoryItem[];
   locationsBySku: Record<string, InventoryLocationBalance[]>;
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  showInactive: boolean;
+  inactiveHiddenCount: number;
+  stats: InventoryStats;
 };
 
-type StatusFilter = "all" | "critical" | "reorder" | "ok" | "inactive";
-
-const PAGE_SIZE = 50;
+type StatusFilter =
+  | "all"
+  | "critical"
+  | "watch"
+  | "reorder_needed"
+  | "ok"
+  | "no_demand"
+  | "reorder"
+  | "inactive";
 
 const filterSelectClassName =
   "h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-tbc-red focus:outline-none focus:ring-2 focus:ring-tbc-red/20";
 
 const STATUS_ORDER: Record<ReorderStatus, number> = {
   critical: 0,
-  reorder: 1,
-  ok: 2,
-  inactive: 3,
+  watch: 1,
+  reorder_needed: 2,
+  ok: 3,
+  no_demand: 4,
 };
 
 function matchesStatusFilter(
@@ -55,6 +67,14 @@ function matchesStatusFilter(
     return true;
   }
 
+  if (filter === "reorder") {
+    return status === "reorder_needed";
+  }
+
+  if (filter === "inactive") {
+    return status === "no_demand";
+  }
+
   return status === filter;
 }
 
@@ -62,26 +82,50 @@ function formatClassCategory(itemClass: string | null, category: string | null):
   return [itemClass, category].filter(Boolean).join(" / ");
 }
 
-export function InventoryTable({ items, locationsBySku }: InventoryTableProps) {
+function inventoryPageHref(page: number, showInactive: boolean): string {
+  const params = new URLSearchParams();
+
+  if (page > 1) {
+    params.set("page", String(page));
+  }
+
+  if (showInactive) {
+    params.set("inactive", "true");
+  }
+
+  const queryString = params.toString();
+  return queryString ? `/inventory?${queryString}` : "/inventory";
+}
+
+export function InventoryTable({
+  items,
+  locationsBySku,
+  page,
+  pageSize,
+  totalCount,
+  showInactive,
+  inactiveHiddenCount,
+  stats,
+}: InventoryTableProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [classFilter, setClassFilter] = useState("all");
-  const [showInactiveItems, setShowInactiveItems] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
   const [expandedSku, setExpandedSku] = useState<string | null>(null);
 
-  const inactiveCount = useMemo(
-    () => countInactiveRecommendations(items.map((item) => item.recommendation)),
-    [items]
-  );
+  function handleInactiveToggle(checked: boolean) {
+    const params = new URLSearchParams(searchParams.toString());
 
-  const visibleItems = useMemo(() => {
-    if (showInactiveItems) {
-      return items;
+    if (checked) {
+      params.set("inactive", "true");
+    } else {
+      params.delete("inactive");
     }
 
-    return items.filter((item) => item.recommendation.status !== "inactive");
-  }, [items, showInactiveItems]);
+    params.set("page", "1");
+    router.push(`/inventory?${params.toString()}`);
+  }
 
   const classOptions = useMemo(() => {
     const values = new Set<string>();
@@ -98,7 +142,7 @@ export function InventoryTable({ items, locationsBySku }: InventoryTableProps) {
   const filteredRows = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
 
-    const rows = visibleItems.filter((item) => {
+    const rows = items.filter((item) => {
       const { recommendation } = item;
 
       if (!matchesStatusFilter(recommendation.status, statusFilter)) {
@@ -129,53 +173,22 @@ export function InventoryTable({ items, locationsBySku }: InventoryTableProps) {
 
       return left.recommendation.sku.localeCompare(right.recommendation.sku);
     });
-  }, [visibleItems, searchQuery, statusFilter, classFilter]);
+  }, [items, searchQuery, statusFilter, classFilter]);
 
-  const summaryCounts = useMemo(() => {
-    return filteredRows.reduce(
-      (counts, item) => {
-        const status = item.recommendation.status;
-        if (status === "critical") {
-          counts.critical += 1;
-        } else if (status === "reorder") {
-          counts.reorder += 1;
-        } else if (status === "ok") {
-          counts.ok += 1;
-        }
-        return counts;
-      },
-      { critical: 0, reorder: 0, ok: 0 }
-    );
-  }, [filteredRows]);
-
-  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
-  const pageStart = filteredRows.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
-  const pageEnd = Math.min(currentPage * PAGE_SIZE, filteredRows.length);
-
-  const paginatedRows = useMemo(() => {
-    const startIndex = (currentPage - 1) * PAGE_SIZE;
-    return filteredRows.slice(startIndex, startIndex + PAGE_SIZE);
-  }, [filteredRows, currentPage]);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, statusFilter, classFilter, showInactiveItems]);
-
-  useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
-  }, [currentPage, totalPages]);
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const cataloguePageStart =
+    totalCount === 0 ? 0 : (page - 1) * pageSize + 1;
+  const cataloguePageEnd = Math.min(page * pageSize, totalCount);
+  const isFirstPage = page <= 1;
+  const isLastPage = page >= totalPages;
 
   function clearFilters() {
     setSearchQuery("");
     setStatusFilter("all");
     setClassFilter("all");
-    setShowInactiveItems(false);
-    setCurrentPage(1);
   }
 
-  if (items.length === 0) {
+  if (totalCount === 0) {
     return (
       <div className="space-y-6">
         <EmptyState
@@ -197,10 +210,10 @@ export function InventoryTable({ items, locationsBySku }: InventoryTableProps) {
 
   return (
     <div className="space-y-6">
-      {!showInactiveItems && inactiveCount > 0 ? (
+      {!showInactive && inactiveHiddenCount > 0 ? (
         <div className="flex justify-end">
           <Badge variant="neutral">
-            {inactiveCount} inactive items hidden
+            {formatNumber(inactiveHiddenCount)} inactive items hidden
           </Badge>
         </div>
       ) : null}
@@ -281,13 +294,15 @@ export function InventoryTable({ items, locationsBySku }: InventoryTableProps) {
           <label className="flex h-10 items-center gap-2 rounded-2xl border border-transparent shadow-card bg-white px-3 text-sm text-slate-700">
             <input
               type="checkbox"
-              checked={showInactiveItems}
-              onChange={(event) => setShowInactiveItems(event.target.checked)}
+              checked={showInactive}
+              onChange={(event) => handleInactiveToggle(event.target.checked)}
               className="h-4 w-4 rounded border-slate-300 text-tbc-red focus:ring-tbc-red/20"
             />
             Show inactive items
-            {inactiveCount > 0 ? (
-              <span className="text-xs text-slate-500">({inactiveCount})</span>
+            {!showInactive && inactiveHiddenCount > 0 ? (
+              <span className="text-xs text-slate-500">
+                ({formatNumber(inactiveHiddenCount)})
+              </span>
             ) : null}
           </label>
         </div>
@@ -295,36 +310,39 @@ export function InventoryTable({ items, locationsBySku }: InventoryTableProps) {
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-transparent shadow-card bg-white px-4 py-3 text-sm text-slate-600">
         <span>
-          Total: <strong className="font-semibold text-slate-900">{formatNumber(filteredRows.length)}</strong>
+          Total:{" "}
+          <strong className="font-semibold text-slate-900">
+            {formatNumber(stats.total)}
+          </strong>
         </span>
         <span className="text-slate-300">|</span>
         <span>
           Critical:{" "}
           <strong className="font-semibold text-red-700">
-            {formatNumber(summaryCounts.critical)}
+            {formatNumber(stats.critical)}
           </strong>
         </span>
         <span className="text-slate-300">|</span>
         <span>
           Reorder Needed:{" "}
           <strong className="font-semibold text-amber-700">
-            {formatNumber(summaryCounts.reorder)}
+            {formatNumber(stats.reorderNeeded)}
           </strong>
         </span>
         <span className="text-slate-300">|</span>
         <span>
           OK:{" "}
           <strong className="font-semibold text-green-700">
-            {formatNumber(summaryCounts.ok)}
+            {formatNumber(stats.ok)}
           </strong>
         </span>
       </div>
 
       <Card className="overflow-hidden p-0">
-        {filteredRows.length > 0 ? (
+        {totalCount > 0 ? (
           <p className="border-b border-slate-100 px-6 py-3 text-sm text-slate-600">
-            Showing {formatNumber(pageStart)}-{formatNumber(pageEnd)} of{" "}
-            {formatNumber(filteredRows.length)} items
+            Showing {formatNumber(cataloguePageStart)}-{formatNumber(cataloguePageEnd)} of{" "}
+            {formatNumber(totalCount)} items
           </p>
         ) : null}
 
@@ -374,7 +392,7 @@ export function InventoryTable({ items, locationsBySku }: InventoryTableProps) {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {paginatedRows.map(({ recommendation }) => {
+                  {filteredRows.map(({ recommendation }) => {
                     const classCategory = formatClassCategory(
                       recommendation.itemClass,
                       recommendation.category
@@ -514,28 +532,36 @@ export function InventoryTable({ items, locationsBySku }: InventoryTableProps) {
             </div>
 
             <div className="flex flex-col gap-3 border-t border-slate-100 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-slate-600">
-                Page {currentPage} of {formatNumber(totalPages)}
-              </p>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  disabled={currentPage <= 1}
-                  onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
-                  className="rounded-2xl border border-transparent shadow-card bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Previous
-                </button>
-                <button
-                  type="button"
-                  disabled={currentPage >= totalPages}
-                  onClick={() =>
-                    setCurrentPage((page) => Math.min(totalPages, page + 1))
-                  }
-                  className="rounded-2xl border border-transparent shadow-card bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Next
-                </button>
+              <div className="flex flex-wrap items-center gap-3">
+                <p className="text-sm text-slate-600">
+                  Page {formatNumber(page)} of {formatNumber(totalPages)}
+                </p>
+                <div className="flex gap-2">
+                {isFirstPage ? (
+                  <span className="rounded-2xl border border-transparent bg-white px-3 py-1.5 text-sm font-medium text-slate-400 shadow-card">
+                    Previous
+                  </span>
+                ) : (
+                  <Link
+                    href={inventoryPageHref(page - 1, showInactive)}
+                    className="rounded-2xl border border-transparent bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-card hover:bg-slate-50"
+                  >
+                    Previous
+                  </Link>
+                )}
+                {isLastPage ? (
+                  <span className="rounded-2xl border border-transparent bg-white px-3 py-1.5 text-sm font-medium text-slate-400 shadow-card">
+                    Next
+                  </span>
+                ) : (
+                  <Link
+                    href={inventoryPageHref(page + 1, showInactive)}
+                    className="rounded-2xl border border-transparent bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-card hover:bg-slate-50"
+                  >
+                    Next
+                  </Link>
+                )}
+                </div>
               </div>
             </div>
           </>

@@ -41,6 +41,7 @@ type SyncDatum = {
 
 type DashboardChartsProps = {
   statusData: StatusDatum[];
+  stockStatusNote?: string | null;
   totalSkus: number;
   topDemand: DemandDatum[];
   categoryValue: CategoryDatum[];
@@ -82,6 +83,7 @@ function DonutCenterLabel({
 
 export function DashboardCharts({
   statusData,
+  stockStatusNote,
   totalSkus,
   topDemand,
   categoryValue,
@@ -137,6 +139,11 @@ export function DashboardCharts({
             />
           </PieChart>
         </ResponsiveContainer>
+        {stockStatusNote ? (
+          <p className="mt-3 text-xs text-[var(--color-text-secondary)]">
+            {stockStatusNote}
+          </p>
+        ) : null}
       </div>
 
       <div className="rounded-2xl bg-white p-6 shadow-card xl:col-span-2">

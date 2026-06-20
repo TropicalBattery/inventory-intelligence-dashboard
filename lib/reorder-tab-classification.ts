@@ -59,7 +59,7 @@ export function countReorderTabAttention(
   recommendations: ReorderRecommendation[]
 ): number {
   return recommendations.filter(
-    (rec) => rec.status === "critical" || rec.status === "reorder"
+    (rec) => rec.status === "critical" || rec.status === "watch"
   ).length;
 }
 

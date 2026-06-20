@@ -139,7 +139,8 @@ function getStatusBadge(rec: ReorderRecommendation): {
   if (
     rec.suggestedQtyRounded === 0 &&
     rec.status !== "critical" &&
-    rec.status !== "reorder"
+    rec.status !== "watch" &&
+    rec.status !== "reorder_needed"
   ) {
     return {
       label: "No Suggestion",
@@ -155,7 +156,13 @@ function getStatusBadge(rec: ReorderRecommendation): {
         className:
           "rounded-full border border-[#FCA5A5] bg-[#FDF2F2] px-3 py-1 text-xs font-semibold text-[#CC2B2B]",
       };
-    case "reorder":
+    case "watch":
+      return {
+        label: "Watch",
+        className:
+          "rounded-full border border-[#B8D9F0] bg-[#E6F1FB] px-3 py-1 text-xs font-semibold text-[#185FA5]",
+      };
+    case "reorder_needed":
       return {
         label: "Reorder Needed",
         className:

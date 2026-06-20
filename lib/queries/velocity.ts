@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { buildVelocityDiagnostic } from "@/lib/velocity-engine";
 import { buildReorderRecommendation } from "@/lib/reorder-engine";
 import { TENANT_ID } from "@/lib/tenant";
+import { cache } from "react";
 import type {
   ReorderRecommendation,
   VelocityDiagnostic,
@@ -74,19 +75,19 @@ async function fetchSalesVelocityComputed(): Promise<VwSalesVelocityRow[]> {
   );
 }
 
-export async function getVelocityRowsBySku(): Promise<
-  Map<string, VwSalesVelocityRow>
-> {
-  const viewRows = await fetchSalesVelocityFromView();
-  const rows = viewRows ?? (await fetchSalesVelocityComputed());
-  const map = new Map<string, VwSalesVelocityRow>();
+export const getVelocityRowsBySku = cache(
+  async (): Promise<Map<string, VwSalesVelocityRow>> => {
+    const viewRows = await fetchSalesVelocityFromView();
+    const rows = viewRows ?? (await fetchSalesVelocityComputed());
+    const map = new Map<string, VwSalesVelocityRow>();
 
-  for (const row of rows) {
-    map.set(row.sku, row);
+    for (const row of rows) {
+      map.set(row.sku, row);
+    }
+
+    return map;
   }
-
-  return map;
-}
+);
 
 export async function getVelocityRowForSku(
   sku: string

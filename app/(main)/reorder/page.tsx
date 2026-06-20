@@ -7,6 +7,7 @@ import {
   getVelocityRowsBySku,
 } from "@/lib/queries/velocity";
 import { getSeasonalityProfilesBySku } from "@/lib/seasonality/service";
+import { TENANT_ID } from "@/lib/tenant";
 
 function ReorderPageFallback() {
   return (
@@ -18,7 +19,7 @@ function ReorderPageFallback() {
 
 export default async function ReorderPage() {
   const [recommendations, velocityBySku] = await Promise.all([
-    getReorderRecommendations(),
+    getReorderRecommendations(TENANT_ID),
     getVelocityRowsBySku(),
   ]);
 

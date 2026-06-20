@@ -22,9 +22,12 @@ import {
 } from "@/components/ui/Table";
 import { formatNumber, formatSuggestedQty } from "@/lib/format";
 import {
-  countInactiveRecommendations,
-  filterVisibleRecommendations,
+  countNoDemandRecommendations,
+  filterMainRecommendations,
+  filterNoDemandRecommendations,
   isActionableReorderStatus,
+  sortReorderActionRows,
+  summarizeReorderStatuses,
 } from "@/lib/reorder-filters";
 import { countReorderTabAttention } from "@/lib/reorder-tab-classification";
 import {
@@ -45,7 +48,13 @@ type ReorderActionTabProps = {
   onAttentionCountChange: (count: number) => void;
 };
 
-type StatusFilter = "actionable" | "all" | "critical" | "reorder" | "ok";
+type StatusFilter =
+  | "actionable"
+  | "all"
+  | "critical"
+  | "watch"
+  | "reorder_needed"
+  | "ok";
 
 type SortKey =
   | "status"
@@ -61,9 +70,10 @@ const COLLAPSED_COLUMN_COUNT = 8;
 
 const STATUS_ORDER: Record<ReorderStatus, number> = {
   critical: 0,
-  reorder: 1,
-  ok: 2,
-  inactive: 3,
+  watch: 1,
+  reorder_needed: 2,
+  ok: 3,
+  no_demand: 4,
 };
 
 const filterSelectClassName =
@@ -81,11 +91,13 @@ function matchesStatusFilter(
     case "all":
       return true;
     case "actionable":
-      return status === "critical" || status === "reorder";
+      return status === "critical" || status === "watch";
     case "critical":
       return status === "critical";
-    case "reorder":
-      return status === "reorder";
+    case "watch":
+      return status === "watch";
+    case "reorder_needed":
+      return status === "reorder_needed";
     case "ok":
       return status === "ok";
   }
@@ -122,15 +134,15 @@ function sortRecommendations(
   sortKey: SortKey,
   direction: SortDirection
 ): ReorderRecommendation[] {
+  if (sortKey === "status") {
+    const sorted = sortReorderActionRows(rows);
+    return direction === "desc" ? sorted.reverse() : sorted;
+  }
+
   const sorted = [...rows];
 
   sorted.sort((a, b) => {
     switch (sortKey) {
-      case "status":
-        return (
-          (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) *
-          (direction === "asc" ? 1 : -1)
-        );
       case "sku":
         return compareValues(a.sku, b.sku, direction);
       case "name":
@@ -196,7 +208,7 @@ export function ReorderActionTab({
   onAttentionCountChange,
 }: ReorderActionTabProps) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("actionable");
-  const [showInactiveItems, setShowInactiveItems] = useState(false);
+  const [showNoDemandItems, setShowNoDemandItems] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [supplierFilter, setSupplierFilter] = useState("all");
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
@@ -287,34 +299,25 @@ export function ReorderActionTab({
     return Array.from(names).sort((a, b) => a.localeCompare(b));
   }, [recommendations]);
 
-  const inactiveCount = useMemo(
-    () => countInactiveRecommendations(recommendations),
+  const noDemandCount = useMemo(
+    () => countNoDemandRecommendations(recommendations),
     [recommendations]
   );
 
-  const visibleRecommendations = useMemo(
-    () => filterVisibleRecommendations(recommendations, showInactiveItems),
-    [recommendations, showInactiveItems]
+  const mainRecommendations = useMemo(
+    () => filterMainRecommendations(recommendations),
+    [recommendations]
   );
 
-  const summaryCounts = useMemo(() => {
-    return visibleRecommendations.reduce(
-      (counts, rec) => {
-        if (rec.status === "inactive") {
-          return counts;
-        }
+  const summaryCounts = useMemo(
+    () => summarizeReorderStatuses(recommendations),
+    [recommendations]
+  );
 
-        counts[rec.status] += 1;
-        return counts;
-      },
-      { critical: 0, reorder: 0, ok: 0 }
-    );
-  }, [visibleRecommendations]);
-
-  const filteredRows = useMemo(() => {
+  const filteredMainRows = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
 
-    return visibleRecommendations.filter((rec) => {
+    return mainRecommendations.filter((rec) => {
       if (!matchesStatusFilter(rec.status, statusFilter)) {
         return false;
       }
@@ -332,15 +335,39 @@ export function ReorderActionTab({
       const nameMatch = rec.name?.toLowerCase().includes(query) ?? false;
       return skuMatch || nameMatch;
     });
-  }, [visibleRecommendations, searchQuery, statusFilter, supplierFilter]);
+  }, [mainRecommendations, searchQuery, statusFilter, supplierFilter]);
 
-  const sortedRows = useMemo(
-    () => sortRecommendations(filteredRows, sortKey, sortDirection),
-    [filteredRows, sortKey, sortDirection]
+  const filteredNoDemandRows = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
+    return filterNoDemandRecommendations(recommendations).filter((rec) => {
+      const supplierLabel = rec.supplierName ?? rec.supplierExternalId ?? "";
+      if (supplierFilter !== "all" && supplierLabel !== supplierFilter) {
+        return false;
+      }
+
+      if (!query) {
+        return true;
+      }
+
+      const skuMatch = rec.sku.toLowerCase().includes(query);
+      const nameMatch = rec.name?.toLowerCase().includes(query) ?? false;
+      return skuMatch || nameMatch;
+    });
+  }, [recommendations, searchQuery, supplierFilter]);
+
+  const sortedMainRows = useMemo(
+    () => sortRecommendations(filteredMainRows, sortKey, sortDirection),
+    [filteredMainRows, sortKey, sortDirection]
+  );
+
+  const sortedNoDemandRows = useMemo(
+    () => sortRecommendations(filteredNoDemandRows, "sku", "asc"),
+    [filteredNoDemandRows]
   );
 
   const filterDescription = useMemo(() => {
-    const parts = [`${filteredRows.length} reorderable item(s) in view`];
+    const parts = [`${sortedMainRows.length} reorderable item(s) in view`];
 
     if (statusFilter !== "all") {
       parts.push(`status filter: ${statusFilter}`);
@@ -355,11 +382,11 @@ export function ReorderActionTab({
     }
 
     return parts.join("; ");
-  }, [filteredRows.length, searchQuery, statusFilter, supplierFilter]);
+  }, [sortedMainRows.length, searchQuery, statusFilter, supplierFilter]);
 
   const selectedRows = useMemo(
-    () => visibleRecommendations.filter((rec) => selectedKeys.has(rowKey(rec))),
-    [visibleRecommendations, selectedKeys]
+    () => mainRecommendations.filter((rec) => selectedKeys.has(rowKey(rec))),
+    [mainRecommendations, selectedKeys]
   );
 
   const vendorPoCount = useMemo(() => {
@@ -370,14 +397,9 @@ export function ReorderActionTab({
     return suppliers.size;
   }, [selectedRows]);
 
-  const filteredAttentionCount = useMemo(
-    () => countReorderTabAttention(filteredRows),
-    [filteredRows]
-  );
-
   useEffect(() => {
-    onAttentionCountChange(filteredAttentionCount);
-  }, [filteredAttentionCount, onAttentionCountChange]);
+    onAttentionCountChange(countReorderTabAttention(recommendations));
+  }, [recommendations, onAttentionCountChange]);
 
   function handleSort(nextKey: SortKey) {
     if (sortKey === nextKey) {
@@ -402,9 +424,9 @@ export function ReorderActionTab({
     });
   }
 
-  function selectAllCriticalAndReorder() {
+  function selectAllCriticalAndWatch() {
     const next = new Set<string>();
-    for (const rec of sortedRows) {
+    for (const rec of sortedMainRows) {
       if (isActionableReorderStatus(rec.status)) {
         next.add(rowKey(rec));
       }
@@ -431,25 +453,30 @@ export function ReorderActionTab({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap gap-2 px-1">
-        <span className="rounded-full border border-[#FCA5A5] bg-[#FDF2F2] px-2.5 py-0.5 text-xs font-medium text-[#CC2B2B]">
-          {summaryCounts.critical} Critical
-        </span>
-        <span className="rounded-full border border-[#FDE68A] bg-[#FFFBEB] px-2.5 py-0.5 text-xs font-medium text-[#B45309]">
-          {summaryCounts.reorder} Reorder Needed
-        </span>
-        <span className="rounded-full border border-[#86EFAC] bg-[#F0FDF4] px-2.5 py-0.5 text-xs font-medium text-[#16A34A]">
-          {summaryCounts.ok} OK
-        </span>
-        {inactiveCount > 0 ? (
-          <Badge variant="neutral">
-            {inactiveCount} inactive items hidden
-          </Badge>
-        ) : null}
+      <div className="space-y-3 px-1">
+        <div className="flex flex-wrap gap-2">
+          <span className="rounded-full border border-[#FCA5A5] bg-[#FDF2F2] px-2.5 py-0.5 text-xs font-medium text-[#CC2B2B]">
+            {summaryCounts.critical} Critical
+          </span>
+          <span className="rounded-full border border-[#B8D9F0] bg-[#E6F1FB] px-2.5 py-0.5 text-xs font-medium text-[#185FA5]">
+            {summaryCounts.watch} Watch
+          </span>
+          <span className="rounded-full border border-[#86EFAC] bg-[#F0FDF4] px-2.5 py-0.5 text-xs font-medium text-[#16A34A]">
+            {summaryCounts.ok} OK
+          </span>
+          <span className="rounded-full border border-[#FDE68A] bg-[#FFFBEB] px-2.5 py-0.5 text-xs font-medium text-[#B45309]">
+            {summaryCounts.reorder_needed} Reorder Needed
+          </span>
+        </div>
+        <p className="text-xs text-[var(--color-text-secondary)]">
+          Reorder Needed shows 0 because reorder levels are not set in GP. The
+          platform calculates ROP automatically once supplier lead times are
+          added in Reference Data.
+        </p>
       </div>
 
       <AiSummaryPanel
-        filteredRecommendations={filteredRows}
+        filteredRecommendations={sortedMainRows}
         diagnosticsBySku={diagnosticsBySku}
         filterDescription={filterDescription}
       />
@@ -470,10 +497,11 @@ export function ReorderActionTab({
             }
             className={`${filterSelectClassName} w-full min-w-[180px]`}
           >
-            <option value="actionable">Critical + Reorder Needed</option>
+            <option value="actionable">Critical + Watch</option>
             <option value="all">All</option>
             <option value="critical">Critical</option>
-            <option value="reorder">Reorder Needed</option>
+            <option value="watch">Watch</option>
+            <option value="reorder_needed">Reorder Needed</option>
             <option value="ok">OK</option>
           </select>
         </div>
@@ -525,19 +553,17 @@ export function ReorderActionTab({
 
         <div className="min-w-[220px]">
           <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
-            Inactive items
+            No demand items
           </label>
           <label className="flex h-10 items-center gap-2 rounded-2xl border border-transparent shadow-card bg-white px-3 text-sm text-slate-700">
             <input
               type="checkbox"
-              checked={showInactiveItems}
-              onChange={(event) => setShowInactiveItems(event.target.checked)}
+              checked={showNoDemandItems}
+              onChange={(event) => setShowNoDemandItems(event.target.checked)}
               className="h-4 w-4 rounded border-[#E5E7EB] text-tbc-red focus:ring-tbc-red/20"
             />
-            Show inactive items
-            {inactiveCount > 0 ? (
-              <span className="text-xs text-slate-500">({inactiveCount})</span>
-            ) : null}
+            Show {noDemandCount.toLocaleString("en-JM")} SKUs with no recent
+            demand
           </label>
         </div>
 
@@ -547,10 +573,10 @@ export function ReorderActionTab({
           </label>
           <button
             type="button"
-            onClick={selectAllCriticalAndReorder}
+            onClick={selectAllCriticalAndWatch}
             className="h-10 w-full rounded-2xl border border-transparent shadow-card bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
-            Select All Critical + Reorder
+            Select All Critical + Watch
           </button>
         </div>
       </div>
@@ -565,7 +591,7 @@ export function ReorderActionTab({
       ) : null}
 
       <Card className="overflow-hidden p-0">
-        {sortedRows.length === 0 ? (
+        {sortedMainRows.length === 0 ? (
           <div className="px-6 py-10 text-center text-sm text-slate-500">
             No rows match the current filters.
           </div>
@@ -625,7 +651,7 @@ export function ReorderActionTab({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {sortedRows.map((rec) => {
+              {sortedMainRows.map((rec) => {
                 const key = rowKey(rec);
                 const isSelected = selectedKeys.has(key);
                 const isExpanded = expandedSkus.has(key);
@@ -653,7 +679,7 @@ export function ReorderActionTab({
                         <input
                           type="checkbox"
                           checked={isSelected}
-                          disabled={rec.status === "inactive"}
+                          disabled={rec.status === "no_demand"}
                           onChange={() => toggleRowSelection(rec)}
                           aria-label={`Select ${rec.sku}`}
                           className="h-4 w-4 rounded border-slate-300 text-tbc-red focus:ring-tbc-red/20 disabled:cursor-not-allowed disabled:opacity-40"
@@ -718,6 +744,115 @@ export function ReorderActionTab({
           </Table>
         )}
       </Card>
+
+      {showNoDemandItems && sortedNoDemandRows.length > 0 ? (
+        <div className="space-y-3">
+          <p className="px-1 text-sm text-[var(--color-text-secondary)]">
+            No demand in last 13 months. May be slow-moving, seasonal, or
+            discontinued.
+          </p>
+          <Card className="overflow-hidden p-0">
+            <Table containerClassName="rounded-none border-0">
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Select</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>SKU</TableHead>
+                  <TableHead>Product Name</TableHead>
+                  <TableHead className="text-right">Qty Available</TableHead>
+                  <TableHead className="text-right">Suggested Qty</TableHead>
+                  <TableHead>Supplier</TableHead>
+                  <TableHead>Months of Cover</TableHead>
+                  <TableHead className="w-10 text-right">
+                    <span className="sr-only">Expand</span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sortedNoDemandRows.map((rec) => {
+                  const key = rowKey(rec);
+                  const isExpanded = expandedSkus.has(key);
+                  const seasonalityProfile = seasonalityBySku[rec.sku] ?? null;
+                  const mutedClassName = "text-[var(--color-text-secondary)]";
+
+                  return (
+                    <Fragment key={`no-demand-${key}`}>
+                      <TableRow
+                        className={`cursor-pointer [&>td]:py-2 ${mutedClassName} ${
+                          isExpanded ? "bg-slate-50 hover:bg-slate-50" : ""
+                        }`}
+                        onClick={() => toggleExpanded(key)}
+                      >
+                        <TableCell onClick={(event) => event.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            disabled
+                            aria-label={`Select ${rec.sku}`}
+                            className="h-4 w-4 rounded border-slate-300 opacity-40"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={getStatusBadgeVariant(rec.status)}>
+                            {getStatusLabel(rec.status)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="max-w-[220px]">
+                          <div className="leading-tight">
+                            <p className="font-mono text-sm font-semibold">
+                              {rec.sku}
+                            </p>
+                            <p className="line-clamp-1 text-xs">
+                              {rec.name ?? "-"}
+                            </p>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatNumber(rec.quantityAvailable)}
+                        </TableCell>
+                        <TableCell>
+                          <CoverBadge rec={rec} />
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatSuggestedQty(rec.suggestedQtyRounded)}
+                        </TableCell>
+                        <TableCell className="max-w-[160px] truncate">
+                          {rec.supplierName ?? rec.supplierExternalId ?? "-"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <ChevronRight
+                            className={`ml-auto h-4 w-4 transition-transform ${
+                              isExpanded ? "rotate-90" : ""
+                            }`}
+                            aria-hidden="true"
+                          />
+                        </TableCell>
+                      </TableRow>
+                      {isExpanded ? (
+                        <TableRow className="hover:bg-transparent">
+                          <TableCell
+                            colSpan={COLLAPSED_COLUMN_COUNT}
+                            className="p-0"
+                          >
+                            <ReorderExpandedPanel
+                              rec={rec}
+                              pipeline={rec.pipelineBreakdown}
+                              seasonalityProfile={seasonalityProfile}
+                              explanation={explanationCache.get(key) ?? null}
+                              isLoadingExplanation={explanationLoading.has(
+                                key
+                              )}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </Card>
+        </div>
+      ) : null}
 
       <div className="sticky bottom-0 z-40 -mx-2 flex items-center justify-between rounded-2xl border border-transparent shadow-card bg-white px-6 py-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
         <p className="text-sm text-slate-700">

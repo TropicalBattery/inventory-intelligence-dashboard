@@ -97,7 +97,7 @@ ${velocitySection}`;
 
 export type PortfolioSummaryPayload = {
   filterDescription: string;
-  statusCounts: { critical: number; reorder: number; ok: number };
+  statusCounts: { critical: number; watch: number; reorder: number; ok: number };
   criticalLineValueTotal: number;
   topCriticalItems: Array<{
     sku: string;
@@ -155,6 +155,7 @@ Filter context: ${payload.filterDescription}
 
 Status counts:
 - Critical: ${payload.statusCounts.critical}
+- Watch: ${payload.statusCounts.watch}
 - Reorder: ${payload.statusCounts.reorder}
 - OK: ${payload.statusCounts.ok}
 
@@ -290,10 +291,10 @@ export function buildPortfolioFallbackSummary(
   payload: PortfolioSummaryPayload
 ): string {
   const { statusCounts, criticalLineValueTotal, velocityAggregates } = payload;
-  const actionable = statusCounts.critical + statusCounts.reorder;
+  const actionable = statusCounts.critical + statusCounts.watch + statusCounts.reorder;
 
   const positionParagraph =
-    `${actionable} item(s) in this view need attention (${statusCounts.critical} critical, ${statusCounts.reorder} reorder), with critical line value of J$${criticalLineValueTotal.toLocaleString("en-JM")}.`;
+    `${actionable} item(s) in this view need attention (${statusCounts.critical} critical, ${statusCounts.watch} watch, ${statusCounts.reorder} reorder), with critical line value of J$${criticalLineValueTotal.toLocaleString("en-JM")}.`;
 
   const riskParagraph =
     `${velocityAggregates.acceleratingStockoutRiskCount} fast-moving item(s) show stockout risk before replenishment, while ${velocityAggregates.deceleratingOverstockRiskCount} slowing item(s) have excess incoming stock. ${velocityAggregates.deadStockCount} item(s) have no sales in 60+ days with J$${velocityAggregates.deadStockTiedUpValue.toLocaleString("en-JM")} tied up.`;

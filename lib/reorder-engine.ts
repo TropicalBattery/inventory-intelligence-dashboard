@@ -269,22 +269,34 @@ export function hasReorderActivitySignals(
 export function classifyReorderStatus(
   input: ClassifyReorderStatusInput
 ): ReorderStatus {
-  if (!hasReorderActivitySignals(input)) {
-    return "inactive";
-  }
+  const quantityAvailable = input.quantityAvailable;
+  const annualDemandUnits = input.annualDemandUnits;
+  const hasDemand = isPositiveNumber(annualDemandUnits);
+  const reorderLevel = input.reorderLevel ?? 0;
+  const hasReorderLevel = isPositiveNumber(input.reorderLevel);
 
-  if (
-    input.quantityAvailable <= 0 ||
-    input.quantityAvailable + input.quantityOnOrder <= 0
-  ) {
+  if (quantityAvailable <= 0 && hasDemand) {
     return "critical";
   }
 
-  if (input.suggestedQty > 0) {
-    return "reorder";
+  if (quantityAvailable <= 0 && !hasDemand && hasReorderLevel) {
+    return "watch";
   }
 
-  return "ok";
+  if (
+    quantityAvailable > 0 &&
+    hasReorderLevel &&
+    quantityAvailable < reorderLevel &&
+    hasDemand
+  ) {
+    return "reorder_needed";
+  }
+
+  if (quantityAvailable > 0 && hasDemand) {
+    return "ok";
+  }
+
+  return "no_demand";
 }
 
 function resolveLeadTimeDays(row: VwReorderInputsRow): {

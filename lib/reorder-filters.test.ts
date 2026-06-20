@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  countInactiveRecommendations,
-  filterVisibleRecommendations,
+  countNoDemandRecommendations,
+  filterMainRecommendations,
   isActionableReorderStatus,
 } from "@/lib/reorder-filters";
 import type { ReorderRecommendation } from "@/lib/types";
@@ -51,37 +51,37 @@ function makeRec(
     roundingUnit: "unit",
     containerCount: null,
     palletCount: null,
-    status: "inactive",
+    status: "no_demand",
     dataGaps: [],
     ...overrides,
   };
 }
 
 describe("reorder filters", () => {
-  it("counts inactive recommendations", () => {
+  it("counts no-demand recommendations", () => {
     const recommendations = [
-      makeRec({ sku: "A", status: "inactive" }),
+      makeRec({ sku: "A", status: "no_demand" }),
       makeRec({ sku: "B", status: "critical" }),
-      makeRec({ sku: "C", status: "inactive" }),
+      makeRec({ sku: "C", status: "no_demand" }),
     ];
 
-    expect(countInactiveRecommendations(recommendations)).toBe(2);
+    expect(countNoDemandRecommendations(recommendations)).toBe(2);
   });
 
-  it("hides inactive items unless the toggle is enabled", () => {
+  it("hides no-demand items from the main table", () => {
     const recommendations = [
-      makeRec({ sku: "A", status: "inactive" }),
-      makeRec({ sku: "B", status: "reorder" }),
+      makeRec({ sku: "A", status: "no_demand" }),
+      makeRec({ sku: "B", status: "reorder_needed" }),
     ];
 
-    expect(filterVisibleRecommendations(recommendations, false)).toHaveLength(1);
-    expect(filterVisibleRecommendations(recommendations, true)).toHaveLength(2);
+    expect(filterMainRecommendations(recommendations)).toHaveLength(1);
   });
 
-  it("treats only critical and reorder as actionable", () => {
+  it("treats critical and watch as actionable", () => {
     expect(isActionableReorderStatus("critical")).toBe(true);
-    expect(isActionableReorderStatus("reorder")).toBe(true);
+    expect(isActionableReorderStatus("watch")).toBe(true);
+    expect(isActionableReorderStatus("reorder_needed")).toBe(false);
     expect(isActionableReorderStatus("ok")).toBe(false);
-    expect(isActionableReorderStatus("inactive")).toBe(false);
+    expect(isActionableReorderStatus("no_demand")).toBe(false);
   });
 });

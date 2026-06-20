@@ -72,7 +72,7 @@ function baseReorderRow(
     roundingUnit: "unit",
     containerCount: null,
     palletCount: null,
-    status: "reorder",
+    status: "reorder_needed",
     dataGaps: [],
     ...overrides,
   };

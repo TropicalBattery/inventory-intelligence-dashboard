@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAllPages } from "@/lib/supabase/paginate";
 import { TENANT_ID } from "@/lib/tenant";
 import {
   buildSkuSeasonalityProfiles,
@@ -16,6 +17,83 @@ import type {
   SeasonalIntelligenceRecord,
   SkuSeasonalityProfile,
 } from "@/lib/seasonality/types";
+
+const SEASONALITY_IN_QUERY_CHUNK_SIZE = 150;
+
+type ItemCostingSeasonalityRow = {
+  sku: string | null;
+  seasonality_strength: string | null;
+  peak_months: number[] | null;
+  seasonality_profile: unknown;
+};
+
+function mapSeasonalityRow(
+  row: ItemCostingSeasonalityRow
+): ItemSeasonalityProfile | null {
+  if (!row.sku) {
+    return null;
+  }
+
+  return {
+    sku: row.sku,
+    seasonality_strength:
+      row.seasonality_strength === "high" ||
+      row.seasonality_strength === "moderate" ||
+      row.seasonality_strength === "flat"
+        ? row.seasonality_strength
+        : null,
+    peak_months: Array.isArray(row.peak_months)
+      ? row.peak_months.map((month) => Number(month)).filter(Number.isFinite)
+      : [],
+    seasonality_profile:
+      row.seasonality_profile && typeof row.seasonality_profile === "object"
+        ? (row.seasonality_profile as SkuSeasonalityProfile)
+        : null,
+  };
+}
+
+async function fetchSeasonalityRowsForSkus(
+  tenantId: string,
+  skus: string[]
+): Promise<ItemCostingSeasonalityRow[]> {
+  const uniqueSkus = Array.from(new Set(skus.filter(Boolean)));
+
+  if (uniqueSkus.length === 0) {
+    return [];
+  }
+
+  const supabase = createAdminClient();
+
+  if (uniqueSkus.length <= SEASONALITY_IN_QUERY_CHUNK_SIZE) {
+    const { data, error } = await supabase
+      .from("item_costing")
+      .select("sku, seasonality_strength, peak_months, seasonality_profile")
+      .eq("tenant_id", tenantId)
+      .in("sku", uniqueSkus);
+
+    if (error) {
+      throw error;
+    }
+
+    return (data ?? []) as ItemCostingSeasonalityRow[];
+  }
+
+  const skuSet = new Set(uniqueSkus);
+
+  const rows = await fetchAllPages<ItemCostingSeasonalityRow>(async (from, to) => {
+    const { data, error } = await supabase
+      .from("item_costing")
+      .select("sku, seasonality_strength, peak_months, seasonality_profile")
+      .eq("tenant_id", tenantId)
+      .not("seasonality_strength", "is", null)
+      .order("sku", { ascending: true })
+      .range(from, to);
+
+    return { data, error };
+  });
+
+  return rows.filter((row) => Boolean(row.sku && skuSet.has(row.sku)));
+}
 
 export async function fetchMonthlyDemandBySku(
   tenantId = TENANT_ID
@@ -114,48 +192,36 @@ export async function getSeasonalityProfilesBySku(
   skus: string[],
   tenantId = TENANT_ID
 ): Promise<Map<string, ItemSeasonalityProfile>> {
-  if (skus.length === 0) {
+  if (!skus || skus.length === 0) {
     return new Map();
   }
 
-  const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("item_costing")
-    .select("sku, seasonality_strength, peak_months, seasonality_profile")
-    .eq("tenant_id", tenantId)
-    .in("sku", skus);
+  try {
+    const rows = await fetchSeasonalityRowsForSkus(tenantId, skus);
+    const profiles = new Map<string, ItemSeasonalityProfile>();
 
-  if (error) {
-    console.error("Failed to fetch seasonality profiles:", error.message);
-    return new Map();
-  }
-
-  const profiles = new Map<string, ItemSeasonalityProfile>();
-
-  for (const row of data ?? []) {
-    if (!row.sku) {
-      continue;
+    for (const row of rows) {
+      const profile = mapSeasonalityRow(row);
+      if (profile) {
+        profiles.set(profile.sku, profile);
+      }
     }
 
-    profiles.set(row.sku, {
-      sku: row.sku,
-      seasonality_strength:
-        row.seasonality_strength === "high" ||
-        row.seasonality_strength === "moderate" ||
-        row.seasonality_strength === "flat"
-          ? row.seasonality_strength
-          : null,
-      peak_months: Array.isArray(row.peak_months)
-        ? row.peak_months.map((month) => Number(month)).filter(Number.isFinite)
-        : [],
-      seasonality_profile:
-        row.seasonality_profile && typeof row.seasonality_profile === "object"
-          ? (row.seasonality_profile as SkuSeasonalityProfile)
-          : null,
-    });
-  }
+    return profiles;
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === "object" &&
+            error !== null &&
+            "message" in error &&
+            typeof error.message === "string"
+          ? error.message
+          : "Unknown error";
 
-  return profiles;
+    console.warn("Seasonality profiles unavailable:", message);
+    return new Map();
+  }
 }
 
 export async function runSeasonalIntelligenceAnalysis(tenantId = TENANT_ID) {

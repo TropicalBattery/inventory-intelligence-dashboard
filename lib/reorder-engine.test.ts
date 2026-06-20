@@ -228,7 +228,7 @@ describe("classifyReorderStatus", () => {
     unitCost: 100,
   };
 
-  it("marks stockouts as critical when activity signals exist", () => {
+  it("marks stockouts as critical when demand exists", () => {
     expect(
       classifyReorderStatus({
         ...activeSignals,
@@ -242,7 +242,37 @@ describe("classifyReorderStatus", () => {
     ).toBe("critical");
   });
 
-  it("marks healthy stock as ok when no reorder is suggested", () => {
+  it("marks zero-stock items with reorder level but no demand as watch", () => {
+    expect(
+      classifyReorderStatus({
+        quantityAvailable: 0,
+        quantityOnOrder: 0,
+        quantityInPipeline: 0,
+        rop: null,
+        reorderLevel: 40,
+        suggestedQty: 0,
+        annualDemandUnits: 0,
+        quantityOnHand: 0,
+        unitCost: 100,
+      })
+    ).toBe("watch");
+  });
+
+  it("marks below-reorder stock with demand as reorder_needed", () => {
+    expect(
+      classifyReorderStatus({
+        ...activeSignals,
+        quantityAvailable: 20,
+        quantityOnOrder: 0,
+        quantityInPipeline: 0,
+        rop: 100,
+        reorderLevel: 50,
+        suggestedQty: 80,
+      })
+    ).toBe("reorder_needed");
+  });
+
+  it("marks healthy stock as ok when demand exists", () => {
     expect(
       classifyReorderStatus({
         ...activeSignals,
@@ -256,7 +286,7 @@ describe("classifyReorderStatus", () => {
     ).toBe("ok");
   });
 
-  it("returns inactive when all activity metrics are zero", () => {
+  it("returns no_demand when demand and actionable stock signals are absent", () => {
     expect(
       classifyReorderStatus({
         quantityAvailable: 0,
@@ -269,7 +299,7 @@ describe("classifyReorderStatus", () => {
         quantityOnHand: 0,
         unitCost: 0,
       })
-    ).toBe("inactive");
+    ).toBe("no_demand");
   });
 });
 
@@ -331,7 +361,7 @@ describe("buildReorderRecommendation", () => {
     expect(recommendation.suggestedQtyRounded).toBe(350);
     expect(recommendation.roundingUnit).toBe("container");
     expect(recommendation.containerCount).toBe(7);
-    expect(recommendation.status).toBe("reorder");
+    expect(recommendation.status).toBe("reorder_needed");
   });
 
   it("uses months-of-demand safety stock for foreign suppliers", () => {
@@ -487,7 +517,7 @@ describe("buildReorderRecommendation", () => {
     expect(recommendation.status).toBe("critical");
   });
 
-  it("returns inactive for all-zero GP master items without inventory activity", () => {
+  it("returns no_demand for all-zero GP master items without inventory activity", () => {
     const recommendation = buildReorderRecommendation(
       baseRow({
         sku: "08500BSER",
@@ -507,10 +537,34 @@ describe("buildReorderRecommendation", () => {
       })
     );
 
-    expect(recommendation.status).toBe("inactive");
+    expect(recommendation.status).toBe("no_demand");
   });
 
-  it("returns inactive for service-style items with no demand or stock signals", () => {
+  it("returns watch for zero-stock items with reorder level but no demand", () => {
+    const recommendation = buildReorderRecommendation(
+      baseRow({
+        sku: "96807L",
+        quantity_on_hand: 0,
+        quantity_available: 0,
+        quantity_on_order: 0,
+        quantity_in_transit: 0,
+        quantity_in_bond: 0,
+        quantity_at_port: 0,
+        quantity_in_clearing: 0,
+        reorder_level: 200,
+        maximum_stock_level: 100,
+        annual_demand_units: 0,
+        avg_daily_demand_units: 0,
+        ordering_cost_per_order: null,
+        holding_cost_per_unit_year: null,
+        lead_time_days: null,
+      })
+    );
+
+    expect(recommendation.status).toBe("watch");
+  });
+
+  it("returns no_demand for service-style items with no demand or stock signals", () => {
     const recommendation = buildReorderRecommendation(
       baseRow({
         sku: "08620TSER",
@@ -528,6 +582,6 @@ describe("buildReorderRecommendation", () => {
       })
     );
 
-    expect(recommendation.status).toBe("inactive");
+    expect(recommendation.status).toBe("no_demand");
   });
 });
