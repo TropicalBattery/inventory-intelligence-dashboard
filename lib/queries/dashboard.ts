@@ -1,4 +1,6 @@
 import { getLatestConnectorHeartbeat } from "@/lib/queries/connector-health";
+import { getActiveInventoryWhitelist } from "@/lib/queries/active-inventory-whitelist";
+import { getReorderRecommendations } from "@/lib/queries/reorder";
 import { getConnectorHealthState } from "@/lib/connector/health";
 import { toNumber } from "@/lib/format";
 import {
@@ -265,6 +267,8 @@ export type DashboardStatusCounts = {
 
 export type DashboardStats = {
   totalSkus: number;
+  /** Whitelist size when soft filter is active; null when empty-table fallback. */
+  activeWorkflowSkuCount: number | null;
   totalInventoryValue: number;
   itemsBelowReorderLevel: number;
   criticalCount: number;
@@ -329,6 +333,9 @@ function mapCriticalViewRowToRecommendation(
     itemClass: row.item_class,
     category: row.category,
     isActive: true,
+    isWhitelisted: true,
+    buyerRank: null,
+    purchaseRule: null,
     quantityOnHand: 0,
     quantityAvailable,
     quantityAllocated: 0,
@@ -345,10 +352,22 @@ function mapCriticalViewRowToRecommendation(
     maximumStockLevel: null,
     annualDemandUnits,
     avgDailyDemandUnits: null,
+    rawAvgDailyDemandUnits: null,
+    stockoutMonthsExcluded: null,
+    abcClass: null,
+    turnoverRatio: null,
     unitCost: toNumber(row.unit_cost),
     supplierExternalId: null,
     vendorItemNumber: null,
     leadTimeDays: null,
+    effectiveLeadTimeDays: null,
+    leadTimeSource: null,
+    effectiveLeadTimeSupplierExternalId: null,
+    coverBands: {
+      criticalBelow: 1,
+      watchBelow: 2,
+      okBelow: 6,
+    },
     palletQty: null,
     containerQty: null,
     orderingCostPerOrder: null,
@@ -366,6 +385,7 @@ function mapCriticalViewRowToRecommendation(
     palletCount: null,
     status: "critical",
     dataGaps: [],
+    seasonality: null,
   };
 }
 
@@ -399,6 +419,7 @@ export const getDashboardStats = cache(async (): Promise<DashboardStats> => {
     { data: topDemandRaw, error: topDemandError },
     { data: categoryValueRaw, error: categoryValueError },
     heartbeat,
+    whitelist,
   ] = await Promise.all([
     supabase
       .from("products")
@@ -421,6 +442,7 @@ export const getDashboardStats = cache(async (): Promise<DashboardStats> => {
       .limit(10),
     supabase.rpc("get_category_value", { p_tenant_id: TENANT_ID }),
     getLatestConnectorHeartbeat(),
+    getActiveInventoryWhitelist(),
   ]);
 
   if (totalSkusError) {
@@ -459,31 +481,69 @@ export const getDashboardStats = cache(async (): Promise<DashboardStats> => {
     );
   }
 
-  const statusCounts = parseInventoryStatusCounts(statusCountsRaw);
-  const criticalItems = ((criticalItemsRaw ?? []) as CriticalViewRow[]).map(
+  const rpcStatusCounts = parseInventoryStatusCounts(statusCountsRaw);
+  let statusCounts: DashboardStatusCounts = {
+    critical: rpcStatusCounts?.critical ?? 0,
+    watch: 0,
+    reorder_needed: rpcStatusCounts?.reorder_needed ?? 0,
+    ok: rpcStatusCounts?.ok ?? 0,
+    no_demand: rpcStatusCounts?.no_demand ?? 0,
+  };
+  let criticalItems = ((criticalItemsRaw ?? []) as CriticalViewRow[]).map(
     mapCriticalViewRowToRecommendation
   );
-  const topDemand = ((topDemandRaw ?? []) as TopDemandCostRow[]).map((row) => ({
+  let topDemand = ((topDemandRaw ?? []) as TopDemandCostRow[]).map((row) => ({
     sku: row.sku,
     name: row.sku,
     demand: toNumber(row.annual_demand_units),
   }));
+  let activeWorkflowSkuCount: number | null = null;
+
+  if (whitelist.isActive) {
+    activeWorkflowSkuCount = whitelist.skuCount;
+    const recommendations = await getReorderRecommendations(TENANT_ID);
+    const active = recommendations.filter((rec) => rec.isWhitelisted);
+
+    const counts: DashboardStatusCounts = {
+      critical: 0,
+      watch: 0,
+      reorder_needed: 0,
+      ok: 0,
+      no_demand: 0,
+    };
+    for (const rec of active) {
+      counts[rec.status] += 1;
+    }
+    // Donut keeps catalogue watch unused historically; surface watch from engine.
+    statusCounts = counts;
+
+    criticalItems = active
+      .filter((rec) => rec.status === "critical")
+      .slice(0, 5);
+
+    topDemand = active
+      .filter((rec) => (rec.annualDemandUnits ?? 0) > 0)
+      .sort(
+        (a, b) => (b.annualDemandUnits ?? 0) - (a.annualDemandUnits ?? 0)
+      )
+      .slice(0, 10)
+      .map((rec) => ({
+        sku: rec.sku,
+        name: rec.name ?? rec.sku,
+        demand: rec.annualDemandUnits ?? 0,
+      }));
+  }
 
   return {
     totalSkus: totalSkus ?? 0,
+    activeWorkflowSkuCount,
     totalInventoryValue: toNumber(inventoryValue),
-    itemsBelowReorderLevel: statusCounts?.reorder_needed ?? 0,
-    criticalCount: statusCounts?.critical ?? 0,
+    itemsBelowReorderLevel: statusCounts.reorder_needed,
+    criticalCount: statusCounts.critical,
     connectorHealth: getConnectorHealthState(heartbeat?.sent_at ?? null),
     topDemand,
     categoryValue: parseCategoryValue(categoryValueRaw),
-    statusCounts: {
-      critical: statusCounts?.critical ?? 0,
-      watch: 0,
-      reorder_needed: statusCounts?.reorder_needed ?? 0,
-      ok: statusCounts?.ok ?? 0,
-      no_demand: statusCounts?.no_demand ?? 0,
-    },
+    statusCounts,
     criticalItems,
   };
 });

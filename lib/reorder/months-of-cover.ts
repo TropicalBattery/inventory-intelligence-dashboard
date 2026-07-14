@@ -1,7 +1,25 @@
-import { DAYS_PER_MONTH } from "@/lib/reorder-engine";
+import {
+  DAYS_PER_MONTH,
+  resolveCoverBands,
+  type CoverBands,
+} from "@/lib/reorder/cover-thresholds";
 import type { ReorderRecommendation } from "@/lib/types";
 
-export type MonthsOfCoverColorTier = "unknown" | "red" | "amber" | "green";
+export type MonthsOfCoverColorTier =
+  | "unknown"
+  | "red"
+  | "amber"
+  | "orange"
+  | "green";
+
+export type MonthsOfCoverPositionInput = Pick<
+  ReorderRecommendation,
+  | "quantityOnHand"
+  | "quantityAllocated"
+  | "quantityInPipeline"
+  | "annualDemandUnits"
+  | "avgDailyDemandUnits"
+>;
 
 function isPositiveNumber(value: number | null | undefined): value is number {
   return value !== null && value !== undefined && Number.isFinite(value) && value > 0;
@@ -25,14 +43,7 @@ export function resolveAvgMonthlyDemand(
 }
 
 export function computeMonthsOfCoverAtOrderQty(
-  rec: Pick<
-    ReorderRecommendation,
-    | "quantityOnHand"
-    | "quantityAllocated"
-    | "quantityInPipeline"
-    | "annualDemandUnits"
-    | "avgDailyDemandUnits"
-  >,
+  rec: MonthsOfCoverPositionInput,
   orderQty: number
 ): number | null {
   const avgMonthlyDemand = resolveAvgMonthlyDemand(rec);
@@ -48,13 +59,23 @@ export function computeMonthsOfCoverAtOrderQty(
 }
 
 export function computeCurrentMonthsOfCover(
-  rec: Parameters<typeof computeMonthsOfCoverAtOrderQty>[0]
+  rec: MonthsOfCoverPositionInput
 ): number | null {
   return computeMonthsOfCoverAtOrderQty(rec, 0);
 }
 
+/**
+ * Same position formula as the cover badge (`computeCurrentMonthsOfCover`).
+ * Used by status classification so status and badge colour never disagree.
+ */
+export function computeMonthsOfCoverForClassification(
+  input: MonthsOfCoverPositionInput
+): number | null {
+  return computeCurrentMonthsOfCover(input);
+}
+
 export function computeProjectedMonthsOfCover(
-  rec: Parameters<typeof computeMonthsOfCoverAtOrderQty>[0] & {
+  rec: MonthsOfCoverPositionInput & {
     suggestedQtyRounded: number;
   }
 ): number | null {
@@ -78,18 +99,23 @@ export function formatMonthsOfCoverShort(months: number | null): string {
 }
 
 export function getMonthsOfCoverColorTier(
-  months: number | null
+  months: number | null,
+  bands: CoverBands = resolveCoverBands(null)
 ): MonthsOfCoverColorTier {
   if (months === null || !Number.isFinite(months)) {
     return "unknown";
   }
 
-  if (months < 2) {
+  if (months < bands.criticalBelow) {
     return "red";
   }
 
-  if (months < 4) {
+  if (months < bands.watchBelow) {
     return "amber";
+  }
+
+  if (months < bands.okBelow) {
+    return "orange";
   }
 
   return "green";
@@ -101,6 +127,8 @@ export function getMonthsOfCoverTextClasses(tier: MonthsOfCoverColorTier): strin
       return "text-[#CC2B2B]";
     case "amber":
       return "text-[#B45309]";
+    case "orange":
+      return "text-[#C2410C]";
     case "green":
       return "text-[#16A34A]";
     default:
@@ -114,6 +142,8 @@ export function getMonthsOfCoverBadgeClasses(tier: MonthsOfCoverColorTier): stri
       return "border-[#FCA5A5] bg-[#FDF2F2] text-[#CC2B2B]";
     case "amber":
       return "border-[#FDE68A] bg-[#FFFBEB] text-[#B45309]";
+    case "orange":
+      return "border-[#FDBA74] bg-[#FFF7ED] text-[#C2410C]";
     case "green":
       return "border-[#86EFAC] bg-[#F0FDF4] text-[#16A34A]";
     default:

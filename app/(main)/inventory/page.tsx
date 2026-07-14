@@ -1,10 +1,10 @@
 import { InventoryTable } from "@/components/inventory/inventory-table";
+import { getLastSuccessfulInventoryBalancesSyncAt } from "@/lib/connector/health";
+import { getRecentSyncRuns } from "@/lib/queries/connector-health";
 import {
+  getAllInventoryItems,
   getInventoryInactiveHiddenCount,
-  getInventoryItemCount,
-  getInventoryItems,
   getInventoryLocationBalancesBySku,
-  getInventoryStats,
   INVENTORY_PAGE_SIZE,
 } from "@/lib/queries/inventory";
 
@@ -18,16 +18,16 @@ export default async function InventoryPage({
     Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
   const showInactive = searchParams.inactive === "true";
 
-  const [items, totalCount, stats, inactiveHiddenCount] = await Promise.all([
-    getInventoryItems(page, showInactive),
-    getInventoryItemCount(showInactive),
-    getInventoryStats(showInactive),
-    getInventoryInactiveHiddenCount(),
+  const [items, syncRuns] = await Promise.all([
+    getAllInventoryItems(),
+    getRecentSyncRuns(),
   ]);
 
-  const skus = items.map((item) => item.recommendation.sku);
-  const locationsBySku = await getInventoryLocationBalancesBySku(skus);
+  const inactiveHiddenCount = await getInventoryInactiveHiddenCount(items);
+  const locationsBySku = await getInventoryLocationBalancesBySku();
   const locationsRecord = Object.fromEntries(locationsBySku.entries());
+  const lastInventorySyncAt =
+    getLastSuccessfulInventoryBalancesSyncAt(syncRuns);
 
   return (
     <InventoryTable
@@ -35,10 +35,9 @@ export default async function InventoryPage({
       locationsBySku={locationsRecord}
       page={page}
       pageSize={INVENTORY_PAGE_SIZE}
-      totalCount={totalCount}
       showInactive={showInactive}
       inactiveHiddenCount={inactiveHiddenCount}
-      stats={stats}
+      lastInventorySyncAt={lastInventorySyncAt}
     />
   );
 }

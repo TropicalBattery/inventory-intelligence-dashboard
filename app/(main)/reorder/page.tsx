@@ -1,6 +1,10 @@
 import { Suspense } from "react";
 import { ReorderRecommendations } from "@/components/reorder/reorder-recommendations";
+import { getLastSuccessfulInventoryBalancesSyncAt } from "@/lib/connector/health";
 import { classifyRecommendationsByTab } from "@/lib/reorder-tab-classification";
+import { getActiveInventoryWhitelist } from "@/lib/queries/active-inventory-whitelist";
+import { getRecentSyncRuns } from "@/lib/queries/connector-health";
+import { getSupplierFilterOptions } from "@/lib/queries/suppliers";
 import { getReorderRecommendations } from "@/lib/queries/reorder";
 import {
   buildVelocityDiagnosticMap,
@@ -18,9 +22,18 @@ function ReorderPageFallback() {
 }
 
 export default async function ReorderPage() {
-  const [recommendations, velocityBySku] = await Promise.all([
+  const [
+    recommendations,
+    velocityBySku,
+    syncRuns,
+    whitelist,
+    supplierFilterOptions,
+  ] = await Promise.all([
     getReorderRecommendations(TENANT_ID),
     getVelocityRowsBySku(),
+    getRecentSyncRuns(),
+    getActiveInventoryWhitelist(),
+    getSupplierFilterOptions(),
   ]);
 
   const classified = classifyRecommendationsByTab(recommendations);
@@ -31,6 +44,8 @@ export default async function ReorderPage() {
   const seasonalityBySku = await getSeasonalityProfilesBySku(
     classified.reorderAction.map((rec) => rec.sku)
   );
+  const lastInventorySyncAt =
+    getLastSuccessfulInventoryBalancesSyncAt(syncRuns);
 
   return (
     <Suspense fallback={<ReorderPageFallback />}>
@@ -39,6 +54,11 @@ export default async function ReorderPage() {
         diagnosticsBySku={Object.fromEntries(diagnosticsBySku.entries())}
         velocityBySku={Object.fromEntries(velocityBySku.entries())}
         seasonalityBySku={Object.fromEntries(seasonalityBySku.entries())}
+        lastInventorySyncAt={lastInventorySyncAt}
+        activeInventorySkuCount={
+          whitelist.isActive ? whitelist.skuCount : null
+        }
+        supplierFilterOptions={supplierFilterOptions}
       />
     </Suspense>
   );

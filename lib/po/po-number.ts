@@ -25,7 +25,7 @@ export async function generatePoNumber(date = new Date()): Promise<string> {
     .from("purchase_orders")
     .select("id", { count: "exact", head: true })
     .eq("tenant_id", TENANT_ID)
-    .eq("source_system", "dashboard")
+    .in("source_system", ["dashboard", "po-cart"])
     .gte("po_date", startOfDay.toISOString())
     .lte("po_date", endOfDay.toISOString());
 

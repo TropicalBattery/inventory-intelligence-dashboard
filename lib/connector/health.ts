@@ -145,13 +145,43 @@ export function getSyncStatusBadgeVariant(
 }
 
 export function getLastSuccessfulSyncCompletedAt(
-  syncRuns: Array<{ status: string | null; completed_at: string | null }>
+  syncRuns: Array<{
+    status: string | null;
+    completed_at: string | null;
+    job_name?: string | null;
+  }>,
+  jobNameFilter?: string
 ): string | null {
+  const normalizedFilter = jobNameFilter?.trim().toLowerCase();
+
   for (const run of syncRuns) {
+    if (normalizedFilter) {
+      const jobName = (run.job_name ?? "").trim().toLowerCase();
+      if (jobName !== normalizedFilter && !jobName.includes(normalizedFilter)) {
+        continue;
+      }
+    }
+
     if (getSyncStatusVariant(run.status) === "success" && run.completed_at) {
       return run.completed_at;
     }
   }
 
   return null;
+}
+
+/** Connector job_name used for inventory balance syncs. */
+export const INVENTORY_BALANCES_JOB_NAME = "Inventory Balances";
+
+export function getLastSuccessfulInventoryBalancesSyncAt(
+  syncRuns: Array<{
+    status: string | null;
+    completed_at: string | null;
+    job_name?: string | null;
+  }>
+): string | null {
+  return getLastSuccessfulSyncCompletedAt(
+    syncRuns,
+    INVENTORY_BALANCES_JOB_NAME
+  );
 }

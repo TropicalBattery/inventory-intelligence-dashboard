@@ -23,7 +23,7 @@ export function getStatusBadgeVariant(status: ReorderStatus): BadgeVariant {
     case "watch":
       return "watch";
     case "reorder_needed":
-      return "warning";
+      return "reorder";
     case "ok":
       return "success";
     case "no_demand":
@@ -32,9 +32,16 @@ export function getStatusBadgeVariant(status: ReorderStatus): BadgeVariant {
 }
 
 export function getStatusBadgeClassName(status: ReorderStatus): string {
-  if (status === "watch") {
-    return "bg-[#E6F1FB] text-[#185FA5]";
+  switch (status) {
+    case "critical":
+      return "border border-[#FCA5A5] bg-[#FDF2F2] text-[#CC2B2B]";
+    case "watch":
+      return "border border-[#FDE68A] bg-[#FFFBEB] text-[#B45309]";
+    case "reorder_needed":
+      return "border border-[#FDBA74] bg-[#FFF7ED] text-[#C2410C]";
+    case "ok":
+      return "border border-[#86EFAC] bg-[#F0FDF4] text-[#16A34A]";
+    case "no_demand":
+      return "border border-[#E5E7EB] bg-[#F3F4F6] text-[#6B7280]";
   }
-
-  return "";
 }

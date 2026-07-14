@@ -1,192 +1,31 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
 import {
-  computeLineTotal,
   hasUnknownLineCosts,
   normalizeStoredLineCost,
-  resolveUnitCostFromSources,
   sumKnownLineTotals,
 } from "@/lib/po/line-cost";
 import { resolvePoSupplierDisplayName } from "@/lib/po/supplier-display";
 import { stripAiPreamble } from "@/lib/ai/strip-preamble";
 import { TENANT_ID } from "@/lib/tenant";
 import type {
-  PoReviewLine,
-  PoReviewSupplierGroup,
   PurchaseOrderDocument,
   PurchaseOrderLineDocument,
   PurchaseOrderListItem,
   PurchaseOrderRecord,
 } from "@/lib/types";
 
-type DraftSelectionRow = {
-  sku: string;
-  supplier_external_id: string | null;
-  suggested_qty: number;
-};
-
-type ProductRow = {
-  sku: string | null;
-  external_id: string;
-  name: string | null;
-  cost_price: number | null;
-};
-
-type SupplierRow = {
-  external_id: string;
-  name: string | null;
-  email: string | null;
-  address: string | null;
-};
-
-type ReferenceRow = {
-  sku: string;
-  supplier_external_id: string;
-  vendor_item_number: string | null;
-  unit_price: number | null;
-};
-
-function resolveUnitCost(
-  product: ProductRow | undefined,
-  reference: ReferenceRow | undefined
-): number | null {
-  return resolveUnitCostFromSources(
-    reference?.unit_price,
-    product?.cost_price
-  );
-}
-
-export async function getDraftPoReviewGroups(
-  batchId: string
-): Promise<PoReviewSupplierGroup[]> {
-  const supabase = await createClient();
-
-  const { data: draftRows, error } = await supabase
-    .from("draft_po_selections")
-    .select("sku, supplier_external_id, suggested_qty")
-    .eq("tenant_id", TENANT_ID)
-    .eq("batch_id", batchId)
-    .order("sku");
-
-  if (error) {
-    console.error("Failed to load draft PO selections:", error.message);
-    return [];
-  }
-
-  const selections = (draftRows ?? []) as DraftSelectionRow[];
-  if (selections.length === 0) {
-    return [];
-  }
-
-  const skus = Array.from(new Set(selections.map((row) => row.sku)));
-  const supplierIds = Array.from(
-    new Set(
-      selections
-        .map((row) => row.supplier_external_id)
-        .filter((value): value is string => Boolean(value))
-    )
-  );
-
-  const [productsResult, suppliersResult, referencesResult] = await Promise.all([
-    supabase
-      .from("products")
-      .select("sku, external_id, name, cost_price")
-      .eq("tenant_id", TENANT_ID)
-      .in("sku", skus),
-    supplierIds.length > 0
-      ? supabase
-          .from("suppliers")
-          .select("external_id, name, email, address")
-          .eq("tenant_id", TENANT_ID)
-          .in("external_id", supplierIds)
-      : Promise.resolve({ data: [], error: null }),
-    supplierIds.length > 0
-      ? supabase
-          .from("item_supplier_reference")
-          .select("sku, supplier_external_id, vendor_item_number, unit_price")
-          .eq("tenant_id", TENANT_ID)
-          .in("sku", skus)
-          .in("supplier_external_id", supplierIds)
-      : Promise.resolve({ data: [], error: null }),
-  ]);
-
-  const products = (productsResult.data ?? []) as ProductRow[];
-  const suppliers = (suppliersResult.data ?? []) as SupplierRow[];
-  const references = (referencesResult.data ?? []) as ReferenceRow[];
-
-  const productBySku = new Map(
-    products
-      .filter((product): product is ProductRow & { sku: string } =>
-        Boolean(product.sku)
-      )
-      .map((product) => [product.sku, product])
-  );
-
-  const supplierByExternalId = new Map(
-    suppliers.map((supplier) => [supplier.external_id, supplier])
-  );
-
-  const referenceByKey = new Map(
-    references.map((reference) => [
-      `${reference.sku}:${reference.supplier_external_id}`,
-      reference,
-    ])
-  );
-
-  const groups = new Map<string, PoReviewSupplierGroup>();
-
-  for (const selection of selections) {
-    const supplierExternalId = selection.supplier_external_id ?? "unknown";
-    const product = productBySku.get(selection.sku);
-    const supplier = supplierByExternalId.get(supplierExternalId);
-    const reference = referenceByKey.get(
-      `${selection.sku}:${supplierExternalId}`
-    );
-    const quantity = Number(selection.suggested_qty) || 0;
-    const unitCost = resolveUnitCost(product, reference);
-
-    const line: PoReviewLine = {
-      sku: selection.sku,
-      productExternalId: product?.external_id ?? null,
-      name: product?.name ?? null,
-      vendorItemNumber: reference?.vendor_item_number ?? null,
-      quantity,
-      unitCost,
-      lineTotal: computeLineTotal(quantity, unitCost),
-    };
-
-    const existing = groups.get(supplierExternalId);
-    if (existing) {
-      existing.lines.push(line);
-      continue;
-    }
-
-    groups.set(supplierExternalId, {
-      supplierExternalId,
-      supplierName: supplier?.name ?? supplierExternalId,
-      supplierEmail: supplier?.email ?? null,
-      supplierAddress: supplier?.address ?? null,
-      lines: [line],
-    });
-  }
-
-  return Array.from(groups.values()).sort((a, b) =>
-    (a.supplierName ?? a.supplierExternalId).localeCompare(
-      b.supplierName ?? b.supplierExternalId
-    )
-  );
-}
-
 export async function getPurchaseOrderList(): Promise<PurchaseOrderListItem[]> {
-  const supabase = await createClient();
+  // Use service role — same as document/detail paths. Session/RLS client
+  // cannot see rows written by po-cart (and other) admin inserts.
+  const supabase = createAdminClient();
 
   const { data, error } = await supabase
     .from("purchase_orders")
     .select(
-      "id, external_id, po_number, supplier_external_id, po_date, total_amount, status, sent_at"
+      "id, external_id, po_number, supplier_external_id, po_date, total_amount, status, sent_at, source_system"
     )
     .eq("tenant_id", TENANT_ID)
-    .order("po_date", { ascending: false });
+    .order("po_date", { ascending: false, nullsFirst: false });
 
   if (error) {
     console.error("Failed to fetch purchase orders:", error.message);

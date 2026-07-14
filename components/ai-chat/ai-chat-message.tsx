@@ -1,5 +1,7 @@
 "use client";
 
+import { Fragment, type ReactNode } from "react";
+
 type AiChatMessageProps = {
   role: "user" | "assistant";
   content: string;
@@ -8,45 +10,98 @@ type AiChatMessageProps = {
 };
 
 type ParsedBlock =
-  | { type: "text"; content: string }
+  | { type: "heading"; level: 3 | 4; content: string }
+  | { type: "paragraph"; content: string }
+  | { type: "hr" }
+  | { type: "ordered_list"; items: string[] }
+  | { type: "unordered_list"; items: string[] }
   | { type: "table"; headers: string[]; rows: string[][] };
 
 const MAX_TABLE_ROWS = 20;
+const HEADING_CLASS =
+  "text-sm font-semibold text-[#111111] mt-3 mb-1 dark:text-slate-100";
+const PARAGRAPH_CLASS = "mb-2 leading-relaxed";
+
+function splitTableRow(line: string): string[] {
+  return line
+    .slice(1, -1)
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function isTableSeparator(line: string): boolean {
+  return /^\|(?:\s*:?-+:?\s*\|)+\s*$/.test(line);
+}
+
+function isTableRow(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.startsWith("|") && trimmed.endsWith("|");
+}
+
+function matchHeading(line: string): { level: 3 | 4; content: string } | null {
+  const match = /^(#{3,4})\s+(.+)$/.exec(line.trim());
+  if (!match) {
+    return null;
+  }
+
+  const hashes = match[1] ?? "";
+  const content = (match[2] ?? "").trim();
+  if (!content) {
+    return null;
+  }
+
+  if (hashes.length === 4) {
+    return { level: 4, content };
+  }
+
+  if (hashes.length === 3) {
+    return { level: 3, content };
+  }
+
+  return null;
+}
+
+function matchOrderedItem(line: string): string | null {
+  const match = /^\d+\.\s+(.+)$/.exec(line.trim());
+  return match?.[1]?.trim() ?? null;
+}
+
+function matchBulletItem(line: string): string | null {
+  const match = /^[-*]\s+(.+)$/.exec(line.trim());
+  return match?.[1]?.trim() ?? null;
+}
 
 function parseMarkdownBlocks(content: string): ParsedBlock[] {
   const lines = content.split("\n");
   const blocks: ParsedBlock[] = [];
-  let textBuffer: string[] = [];
   let index = 0;
 
-  function flushText() {
-    if (textBuffer.length === 0) {
-      return;
+  while (index < lines.length) {
+    const rawLine = lines[index] ?? "";
+    const trimmed = rawLine.trim();
+
+    if (!trimmed) {
+      index += 1;
+      continue;
     }
 
-    blocks.push({ type: "text", content: textBuffer.join("\n").trim() });
-    textBuffer = [];
-  }
+    if (trimmed === "---" || trimmed === "***" || trimmed === "___") {
+      blocks.push({ type: "hr" });
+      index += 1;
+      continue;
+    }
 
-  while (index < lines.length) {
-    const line = lines[index]?.trim() ?? "";
-
-    if (line.startsWith("|") && line.endsWith("|")) {
-      const headerCells = splitTableRow(line);
+    if (isTableRow(trimmed)) {
+      const headerCells = splitTableRow(trimmed);
       const separatorLine = lines[index + 1]?.trim() ?? "";
 
-      if (
-        headerCells.length > 0 &&
-        /^\|(?:\s*:?-+:?\s*\|)+\s*$/.test(separatorLine)
-      ) {
-        flushText();
-
+      if (headerCells.length > 0 && isTableSeparator(separatorLine)) {
         const rows: string[][] = [];
         index += 2;
 
         while (index < lines.length) {
           const rowLine = lines[index]?.trim() ?? "";
-          if (!rowLine.startsWith("|") || !rowLine.endsWith("|")) {
+          if (!isTableRow(rowLine)) {
             break;
           }
 
@@ -59,19 +114,128 @@ function parseMarkdownBlocks(content: string): ParsedBlock[] {
       }
     }
 
-    textBuffer.push(lines[index] ?? "");
+    const heading = matchHeading(trimmed);
+    if (heading) {
+      blocks.push({
+        type: "heading",
+        level: heading.level,
+        content: heading.content,
+      });
+      index += 1;
+      continue;
+    }
+
+    const orderedFirst = matchOrderedItem(trimmed);
+    if (orderedFirst !== null) {
+      const items: string[] = [orderedFirst];
+      index += 1;
+
+      while (index < lines.length) {
+        const next = matchOrderedItem(lines[index] ?? "");
+        if (next === null) {
+          break;
+        }
+
+        items.push(next);
+        index += 1;
+      }
+
+      blocks.push({ type: "ordered_list", items });
+      continue;
+    }
+
+    const bulletFirst = matchBulletItem(trimmed);
+    if (bulletFirst !== null) {
+      const items: string[] = [bulletFirst];
+      index += 1;
+
+      while (index < lines.length) {
+        const next = matchBulletItem(lines[index] ?? "");
+        if (next === null) {
+          break;
+        }
+
+        items.push(next);
+        index += 1;
+      }
+
+      blocks.push({ type: "unordered_list", items });
+      continue;
+    }
+
+    const paragraphLines: string[] = [trimmed];
     index += 1;
+
+    while (index < lines.length) {
+      const nextRaw = lines[index] ?? "";
+      const nextTrimmed = nextRaw.trim();
+
+      if (!nextTrimmed) {
+        break;
+      }
+
+      if (
+        nextTrimmed === "---" ||
+        nextTrimmed === "***" ||
+        nextTrimmed === "___" ||
+        matchHeading(nextTrimmed) ||
+        matchOrderedItem(nextTrimmed) !== null ||
+        matchBulletItem(nextTrimmed) !== null ||
+        (isTableRow(nextTrimmed) &&
+          isTableSeparator(lines[index + 1]?.trim() ?? ""))
+      ) {
+        break;
+      }
+
+      paragraphLines.push(nextTrimmed);
+      index += 1;
+    }
+
+    blocks.push({
+      type: "paragraph",
+      content: paragraphLines.join(" "),
+    });
   }
 
-  flushText();
   return blocks;
 }
 
-function splitTableRow(line: string): string[] {
-  return line
-    .slice(1, -1)
-    .split("|")
-    .map((cell) => cell.trim());
+/** Split on **bold** pairs into React text / <strong> nodes. */
+function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const pattern = /\*\*(.+?)\*\*/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let part = 0;
+
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(
+        <Fragment key={`${keyPrefix}-t-${part}`}>
+          {text.slice(lastIndex, match.index)}
+        </Fragment>
+      );
+      part += 1;
+    }
+
+    nodes.push(
+      <strong key={`${keyPrefix}-b-${part}`} className="font-semibold">
+        {match[1]}
+      </strong>
+    );
+    part += 1;
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push(
+      <Fragment key={`${keyPrefix}-t-${part}`}>
+        {text.slice(lastIndex)}
+      </Fragment>
+    );
+  }
+
+  return nodes.length > 0 ? nodes : [text];
 }
 
 function LoadingDots() {
@@ -98,12 +262,12 @@ function MarkdownTable({
       <table className="w-full border-collapse text-xs">
         <thead>
           <tr>
-            {headers.map((header) => (
+            {headers.map((header, headerIndex) => (
               <th
-                key={header}
+                key={`h-${headerIndex}-${header}`}
                 className="bg-slate-500/10 px-2 py-1 text-left font-medium text-slate-900 dark:bg-slate-400/10 dark:text-slate-100"
               >
-                {header}
+                {renderInlineMarkdown(header, `th-${headerIndex}`)}
               </th>
             ))}
           </tr>
@@ -116,7 +280,7 @@ function MarkdownTable({
                   key={`cell-${rowIndex}-${cellIndex}`}
                   className="border-t border-slate-200 px-2 py-1 text-slate-700 dark:border-slate-700 dark:text-slate-300"
                 >
-                  {cell}
+                  {renderInlineMarkdown(cell, `td-${rowIndex}-${cellIndex}`)}
                 </td>
               ))}
             </tr>
@@ -136,27 +300,62 @@ function AssistantContent({ content }: { content: string }) {
   const blocks = parseMarkdownBlocks(content);
 
   return (
-    <div className="space-y-2">
+    <div>
       {blocks.map((block, index) => {
-        if (block.type === "text") {
-          if (!block.content) {
+        switch (block.type) {
+          case "heading":
+            return (
+              <h4 key={`h-${index}`} className={HEADING_CLASS}>
+                {renderInlineMarkdown(block.content, `h-${index}`)}
+              </h4>
+            );
+          case "hr":
+            return (
+              <hr
+                key={`hr-${index}`}
+                className="my-3 border-0 border-t border-[#E5E7EB] dark:border-slate-700"
+              />
+            );
+          case "ordered_list":
+            return (
+              <ol
+                key={`ol-${index}`}
+                className="mb-2 list-decimal space-y-1 pl-5"
+              >
+                {block.items.map((item, itemIndex) => (
+                  <li key={`ol-${index}-${itemIndex}`}>
+                    {renderInlineMarkdown(item, `ol-${index}-${itemIndex}`)}
+                  </li>
+                ))}
+              </ol>
+            );
+          case "unordered_list":
+            return (
+              <ul key={`ul-${index}`} className="mb-2 list-disc space-y-1 pl-5">
+                {block.items.map((item, itemIndex) => (
+                  <li key={`ul-${index}-${itemIndex}`}>
+                    {renderInlineMarkdown(item, `ul-${index}-${itemIndex}`)}
+                  </li>
+                ))}
+              </ul>
+            );
+          case "table":
+            return (
+              <MarkdownTable
+                key={`table-${index}`}
+                headers={block.headers}
+                rows={block.rows}
+              />
+            );
+          case "paragraph":
+            return (
+              <p key={`p-${index}`} className={PARAGRAPH_CLASS}>
+                {renderInlineMarkdown(block.content, `p-${index}`)}
+              </p>
+            );
+          default:
             return null;
-          }
-
-          return (
-            <p key={`text-${index}`} className="whitespace-pre-wrap">
-              {block.content}
-            </p>
-          );
         }
-
-        return (
-          <MarkdownTable
-            key={`table-${index}`}
-            headers={block.headers}
-            rows={block.rows}
-          />
-        );
       })}
     </div>
   );

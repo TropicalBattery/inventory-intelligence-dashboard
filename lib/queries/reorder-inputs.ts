@@ -1,10 +1,27 @@
+import {
+  getActiveInventoryWhitelist,
+  resolveWhitelistFlags,
+  type ActiveInventoryWhitelist,
+} from "@/lib/queries/active-inventory-whitelist";
+import { getItemPurchaseRulesBySku } from "@/lib/queries/item-purchase-rules";
 import { sortSupplierReferencesForComparison } from "@/lib/suppliers/sort-supplier-references";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchAllPages } from "@/lib/supabase/paginate";
 import { toNumber } from "@/lib/format";
+import {
+  resolveEffectiveLeadTime,
+  sanitizeReorderLevel,
+} from "@/lib/reorder/cover-thresholds";
+import {
+  applyAdjustedDemandToRow,
+  demandWindowEndIso,
+  type MonthlySalesRow,
+} from "@/lib/reorder/demand";
+import { attachSeasonalityToRow } from "@/lib/reorder/seasonality";
 import { TENANT_ID } from "@/lib/tenant";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
+  ItemPurchaseRule,
   SupplierReference,
   SupplierReliabilityRating,
   VwReorderInputsRow,
@@ -70,7 +87,15 @@ function toNullableNumber(
   return toNumber(value);
 }
 
-export function mapViewRowToInputRow(row: VwReorderInputsViewRow): VwReorderInputsRow {
+export function mapViewRowToInputRow(
+  row: VwReorderInputsViewRow,
+  whitelist?: ActiveInventoryWhitelist,
+  purchaseRule: ItemPurchaseRule | null = null
+): VwReorderInputsRow {
+  const flags = whitelist
+    ? resolveWhitelistFlags(row.sku, whitelist)
+    : { isWhitelisted: true, buyerRank: null };
+
   return {
     tenant_id: row.tenant_id,
     sku: row.sku,
@@ -86,19 +111,28 @@ export function mapViewRowToInputRow(row: VwReorderInputsViewRow): VwReorderInpu
     quantity_in_bond: toNullableNumber(row.quantity_in_bond),
     quantity_at_port: toNullableNumber(row.quantity_at_port),
     quantity_in_clearing: toNullableNumber(row.quantity_in_clearing),
-    reorder_level: toNullableNumber(row.reorder_level),
+    reorder_level: sanitizeReorderLevel(toNullableNumber(row.reorder_level)),
     maximum_stock_level: toNullableNumber(row.maximum_stock_level),
     annual_demand_units: toNullableNumber(row.annual_demand_units),
     avg_daily_demand_units: toNullableNumber(row.avg_daily_demand_units),
+    raw_avg_daily_demand_units: null,
+    stockout_months_excluded: null,
     ordering_cost_per_order: toNullableNumber(row.ordering_cost_per_order),
     holding_cost_per_unit_year: toNullableNumber(row.holding_cost_per_unit_year),
     current_cost_local: toNullableNumber(row.unit_cost),
     best_supplier_external_id: row.supplier_external_id,
     best_unit_price: toNullableNumber(row.supplier_unit_price),
     lead_time_days: toNullableNumber(row.lead_time_days),
+    effective_lead_time_days: toNullableNumber(row.lead_time_days),
+    lead_time_source: toNullableNumber(row.lead_time_days) ? "any_vendor" : null,
+    effective_lead_time_supplier_external_id: row.supplier_external_id,
     safety_stock_months: toNullableNumber(row.safety_stock_months),
     pallet_qty: toNullableNumber(row.pallet_qty),
     container_qty: toNullableNumber(row.container_qty),
+    is_whitelisted: flags.isWhitelisted,
+    buyer_rank: flags.buyerRank,
+    purchase_rule: purchaseRule,
+    seasonality: null,
   };
 }
 
@@ -131,7 +165,7 @@ type SkuInventoryAggregate = {
   quantity_in_bond: number;
   quantity_at_port: number;
   quantity_in_clearing: number;
-  reorder_level: number;
+  reorder_level: number | null;
   maximum_stock_level: number;
 };
 
@@ -222,9 +256,106 @@ function mapMvRowToAggregate(row: MvInventoryAggregateRow): SkuInventoryAggregat
     quantity_in_bond: toNumber(row.quantity_in_bond),
     quantity_at_port: toNumber(row.quantity_at_port),
     quantity_in_clearing: toNumber(row.quantity_in_clearing),
-    reorder_level: toNumber(row.reorder_level),
+    reorder_level: sanitizeReorderLevel(toNullableNumber(row.reorder_level)),
     maximum_stock_level: toNumber(row.maximum_stock_level),
   };
+}
+
+type MonthlySalesViewRow = {
+  sku: string | null;
+  sales_month: string;
+  units: number | string | null;
+};
+
+/**
+ * Fetch all available monthly sales (shared by demand adjustment + seasonality).
+ * Upper-bound excludes the current incomplete month; demand.ts still windows
+ * to DEMAND_WINDOW_MONTHS internally.
+ */
+async function fetchMonthlySalesBySku(
+  supabase: SupabaseClient
+): Promise<Map<string, MonthlySalesRow[]>> {
+  const bySku = new Map<string, MonthlySalesRow[]>();
+  const windowEnd = demandWindowEndIso();
+
+  try {
+    const rows = await fetchAllPages<MonthlySalesViewRow>(async (from, to) => {
+      const { data, error } = await supabase
+        .from("vw_monthly_sales_by_sku")
+        .select("sku, sales_month, units")
+        .eq("tenant_id", TENANT_ID)
+        .lt("sales_month", windowEnd)
+        .not("sku", "is", null)
+        .order("sku", { ascending: true })
+        .order("sales_month", { ascending: true })
+        .range(from, to);
+
+      return {
+        data: data as MonthlySalesViewRow[] | null,
+        error,
+      };
+    });
+
+    for (const row of rows) {
+      if (!row.sku) {
+        continue;
+      }
+
+      const list = bySku.get(row.sku) ?? [];
+      list.push({
+        salesMonth: row.sales_month,
+        units: toNumber(row.units),
+      });
+      bySku.set(row.sku, list);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (
+      message.includes("vw_monthly_sales_by_sku") ||
+      message.includes("schema cache")
+    ) {
+      console.warn(
+        "vw_monthly_sales_by_sku unavailable; using item_costing demand only"
+      );
+      return bySku;
+    }
+
+    console.error("Failed to fetch monthly sales by SKU:", message);
+  }
+
+  return bySku;
+}
+
+async function fetchMonthlySalesForSku(
+  supabase: SupabaseClient,
+  sku: string
+): Promise<MonthlySalesRow[]> {
+  const windowEnd = demandWindowEndIso();
+
+  const { data, error } = await supabase
+    .from("vw_monthly_sales_by_sku")
+    .select("sku, sales_month, units")
+    .eq("tenant_id", TENANT_ID)
+    .eq("sku", sku)
+    .lt("sales_month", windowEnd)
+    .order("sales_month", { ascending: true });
+
+  if (error) {
+    if (
+      error.message.includes("vw_monthly_sales_by_sku") ||
+      error.message.includes("schema cache")
+    ) {
+      return [];
+    }
+
+    console.error("Failed to fetch monthly sales for SKU:", error.message);
+    return [];
+  }
+
+  return ((data ?? []) as MonthlySalesViewRow[]).map((row) => ({
+    salesMonth: row.sales_month,
+    units: toNumber(row.units),
+  }));
 }
 
 async function fetchProducts(
@@ -315,10 +446,10 @@ async function fetchBestCostingMaps(supabase: SupabaseClient): Promise<{
   return { bySku, byProductExternalId };
 }
 
-async function fetchBestSupplierReferenceBySku(
+async function fetchSupplierReferencesBySku(
   supabase: SupabaseClient
-): Promise<Map<string, SupplierReferenceRow>> {
-  const bestBySku = new Map<string, SupplierReferenceRow>();
+): Promise<Map<string, SupplierReferenceRow[]>> {
+  const bySku = new Map<string, SupplierReferenceRow[]>();
 
   const rows = await fetchAllPages<SupplierReferenceRow>(async (from, to) => {
     const { data, error } = await supabase
@@ -338,9 +469,25 @@ async function fetchBestSupplierReferenceBySku(
       continue;
     }
 
-    const current = bestBySku.get(row.sku);
-    if (isBetterSupplierReference(row, current)) {
-      bestBySku.set(row.sku, row);
+    const list = bySku.get(row.sku) ?? [];
+    list.push(row);
+    bySku.set(row.sku, list);
+  }
+
+  return bySku;
+}
+
+/** @deprecated Prefer fetchSupplierReferencesBySku; kept for call-site clarity. */
+async function fetchBestSupplierReferenceBySku(
+  supabase: SupabaseClient
+): Promise<Map<string, SupplierReferenceRow>> {
+  const allBySku = await fetchSupplierReferencesBySku(supabase);
+  const bestBySku = new Map<string, SupplierReferenceRow>();
+
+  for (const [sku, rows] of Array.from(allBySku.entries())) {
+    const best = pickBestSupplierReference(rows);
+    if (best) {
+      bestBySku.set(sku, best);
     }
   }
 
@@ -366,11 +513,29 @@ function buildReorderInputRow(
   product: ProductRow,
   inventory: SkuInventoryAggregate | undefined,
   costing: ItemCostingRow | undefined,
-  supplier: SupplierReferenceRow | undefined
+  supplierRows: SupplierReferenceRow[],
+  whitelist: ActiveInventoryWhitelist,
+  purchaseRule: ItemPurchaseRule | null
 ): VwReorderInputsRow | null {
   if (!product.sku) {
     return null;
   }
+
+  const whitelistFlags = resolveWhitelistFlags(product.sku, whitelist);
+  const supplier = pickBestSupplierReference(supplierRows);
+  const lockedVendorId =
+    purchaseRule?.ruleType === "vendor_lock"
+      ? purchaseRule.lockedVendorId
+      : null;
+  const effectiveLead = resolveEffectiveLeadTime(
+    supplierRows.map((row) => ({
+      supplier_external_id: row.supplier_external_id,
+      lead_time_days:
+        row.lead_time_days != null ? toNumber(row.lead_time_days) : null,
+      is_priority_vendor: Boolean(row.is_priority_vendor),
+    })),
+    lockedVendorId
+  );
 
   const inv = inventory ?? {
     quantity_on_hand: 0,
@@ -380,7 +545,7 @@ function buildReorderInputRow(
     quantity_in_bond: 0,
     quantity_at_port: 0,
     quantity_in_clearing: 0,
-    reorder_level: 0,
+    reorder_level: null,
     maximum_stock_level: 0,
   };
 
@@ -424,7 +589,7 @@ function buildReorderInputRow(
     quantity_in_bond: quantityInBond,
     quantity_at_port: quantityAtPort,
     quantity_in_clearing: quantityInClearing,
-    reorder_level: inv.reorder_level,
+    reorder_level: sanitizeReorderLevel(inv.reorder_level),
     maximum_stock_level: inv.maximum_stock_level,
     annual_demand_units: costing?.annual_demand_units
       ? toNumber(costing.annual_demand_units)
@@ -432,6 +597,8 @@ function buildReorderInputRow(
     avg_daily_demand_units: costing?.avg_daily_demand_units
       ? toNumber(costing.avg_daily_demand_units)
       : null,
+    raw_avg_daily_demand_units: null,
+    stockout_months_excluded: null,
     current_cost_local: costing?.current_cost_local
       ? toNumber(costing.current_cost_local)
       : null,
@@ -451,9 +618,14 @@ function buildReorderInputRow(
     best_unit_price:
       supplier?.unit_price != null ? toNumber(supplier.unit_price) : null,
     lead_time_days:
-      supplier?.lead_time_days != null
+      effectiveLead.days ??
+      (supplier?.lead_time_days != null
         ? toNumber(supplier.lead_time_days)
-        : null,
+        : null),
+    effective_lead_time_days: effectiveLead.days,
+    lead_time_source: effectiveLead.source,
+    effective_lead_time_supplier_external_id:
+      effectiveLead.supplierExternalId,
     safety_stock_months:
       supplier?.safety_stock_months != null
         ? toNumber(supplier.safety_stock_months)
@@ -464,6 +636,10 @@ function buildReorderInputRow(
       supplier?.container_qty != null
         ? toNumber(supplier.container_qty)
         : null,
+    is_whitelisted: whitelistFlags.isWhitelisted,
+    buyer_rank: whitelistFlags.buyerRank,
+    purchase_rule: purchaseRule,
+    seasonality: null,
   };
 }
 
@@ -471,13 +647,23 @@ export async function fetchAllReorderInputRows(
   supabase: SupabaseClient = createAdminClient()
 ): Promise<VwReorderInputsRow[]> {
   try {
-    const [products, inventoryBySku, costingMaps, supplierBySku] =
-      await Promise.all([
-        fetchProducts(supabase),
-        fetchInventoryAggregatesBySku(supabase),
-        fetchBestCostingMaps(supabase),
-        fetchBestSupplierReferenceBySku(supabase),
-      ]);
+    const [
+      products,
+      inventoryBySku,
+      costingMaps,
+      suppliersBySku,
+      monthlyBySku,
+      whitelist,
+      purchaseRulesBySku,
+    ] = await Promise.all([
+      fetchProducts(supabase),
+      fetchInventoryAggregatesBySku(supabase),
+      fetchBestCostingMaps(supabase),
+      fetchSupplierReferencesBySku(supabase),
+      fetchMonthlySalesBySku(supabase),
+      getActiveInventoryWhitelist(),
+      getItemPurchaseRulesBySku(),
+    ]);
 
     const rows: VwReorderInputsRow[] = [];
 
@@ -490,11 +676,21 @@ export async function fetchAllReorderInputRows(
           costingMaps.bySku,
           costingMaps.byProductExternalId
         ),
-        product.sku ? supplierBySku.get(product.sku) : undefined
+        product.sku ? (suppliersBySku.get(product.sku) ?? []) : [],
+        whitelist,
+        product.sku ? (purchaseRulesBySku.get(product.sku) ?? null) : null
       );
 
       if (row) {
-        rows.push(row);
+        const monthly = product.sku
+          ? monthlyBySku.get(product.sku)
+          : undefined;
+        rows.push(
+          attachSeasonalityToRow(
+            applyAdjustedDemandToRow(row, monthly),
+            monthly
+          )
+        );
       }
     }
 
@@ -643,6 +839,10 @@ export async function fetchReorderInputRowsPage(
   to: number
 ): Promise<VwReorderInputsRow[]> {
   const supabase = createAdminClient();
+  const [whitelist, purchaseRulesBySku] = await Promise.all([
+    getActiveInventoryWhitelist(),
+    getItemPurchaseRulesBySku(),
+  ]);
 
   const { data, error } = await supabase
     .from("vw_reorder_inputs")
@@ -655,9 +855,27 @@ export async function fetchReorderInputRowsPage(
     throw new Error(error.message);
   }
 
-  return (data ?? []).map((row) =>
-    mapViewRowToInputRow(row as unknown as VwReorderInputsViewRow)
-  );
+  const mapped = (data ?? []).map((row) => {
+    const viewRow = row as unknown as VwReorderInputsViewRow;
+    return mapViewRowToInputRow(
+      viewRow,
+      whitelist,
+      purchaseRulesBySku.get(viewRow.sku) ?? null
+    );
+  });
+
+  if (mapped.length === 0) {
+    return mapped;
+  }
+
+  const monthlyBySku = await fetchMonthlySalesBySku(supabase);
+  return mapped.map((row) => {
+    const monthly = monthlyBySku.get(row.sku);
+    return attachSeasonalityToRow(
+      applyAdjustedDemandToRow(row, monthly),
+      monthly
+    );
+  });
 }
 
 export async function fetchReorderInputRowBySku(
@@ -675,30 +893,34 @@ export async function fetchReorderInputRowBySku(
     return null;
   }
 
-  const [inventoryResult, costingRows, supplierRows] = await Promise.all([
-    supabase
-      .from("mv_inventory_aggregates_by_sku")
-      .select(
-        "sku, quantity_on_hand, quantity_available, quantity_on_order, quantity_in_transit, quantity_in_bond, quantity_at_port, quantity_in_clearing, reorder_level, maximum_stock_level"
-      )
-      .eq("tenant_id", TENANT_ID)
-      .eq("sku", sku)
-      .maybeSingle(),
-    supabase
-      .from("item_costing")
-      .select(
-        "sku, product_external_id, annual_demand_units, avg_daily_demand_units, current_cost_local, ordering_cost_per_order, holding_cost_per_unit_year, source_updated_at"
-      )
-      .eq("tenant_id", TENANT_ID)
-      .or(`sku.eq.${sku},product_external_id.eq.${product.external_id}`),
-    supabase
-      .from("item_supplier_reference")
-      .select(
-        "sku, supplier_external_id, lead_time_days, safety_stock_months, qty_in_transit, qty_in_bond, qty_at_port, qty_in_clearing, pallet_qty, container_qty, is_priority_vendor, ordering_cost_per_order, holding_cost_per_unit_year, unit_price"
-      )
-      .eq("tenant_id", TENANT_ID)
-      .eq("sku", sku),
-  ]);
+  const [inventoryResult, costingRows, supplierRows, monthlyRows, whitelist, purchaseRulesBySku] =
+    await Promise.all([
+      supabase
+        .from("mv_inventory_aggregates_by_sku")
+        .select(
+          "sku, quantity_on_hand, quantity_available, quantity_on_order, quantity_in_transit, quantity_in_bond, quantity_at_port, quantity_in_clearing, reorder_level, maximum_stock_level"
+        )
+        .eq("tenant_id", TENANT_ID)
+        .eq("sku", sku)
+        .maybeSingle(),
+      supabase
+        .from("item_costing")
+        .select(
+          "sku, product_external_id, annual_demand_units, avg_daily_demand_units, current_cost_local, ordering_cost_per_order, holding_cost_per_unit_year, source_updated_at"
+        )
+        .eq("tenant_id", TENANT_ID)
+        .or(`sku.eq.${sku},product_external_id.eq.${product.external_id}`),
+      supabase
+        .from("item_supplier_reference")
+        .select(
+          "sku, supplier_external_id, lead_time_days, safety_stock_months, qty_in_transit, qty_in_bond, qty_at_port, qty_in_clearing, pallet_qty, container_qty, is_priority_vendor, ordering_cost_per_order, holding_cost_per_unit_year, unit_price"
+        )
+        .eq("tenant_id", TENANT_ID)
+        .eq("sku", sku),
+      fetchMonthlySalesForSku(supabase, sku),
+      getActiveInventoryWhitelist(),
+      getItemPurchaseRulesBySku(),
+    ]);
 
   const inventory = inventoryResult.data
     ? mapMvRowToAggregate(inventoryResult.data as MvInventoryAggregateRow)
@@ -706,11 +928,22 @@ export async function fetchReorderInputRowBySku(
   const costing = pickBestCostingRow(
     (costingRows.data ?? []) as ItemCostingRow[]
   );
-  const supplier = pickBestSupplierReference(
-    (supplierRows.data ?? []) as SupplierReferenceRow[]
+  const row = buildReorderInputRow(
+    product,
+    inventory,
+    costing,
+    (supplierRows.data ?? []) as SupplierReferenceRow[],
+    whitelist,
+    purchaseRulesBySku.get(sku) ?? null
   );
+  if (!row) {
+    return null;
+  }
 
-  return buildReorderInputRow(product, inventory, costing, supplier);
+  return attachSeasonalityToRow(
+    applyAdjustedDemandToRow(row, monthlyRows),
+    monthlyRows
+  );
 }
 
 function pickBestCostingRow(rows: ItemCostingRow[]): ItemCostingRow | undefined {

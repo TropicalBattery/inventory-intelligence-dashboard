@@ -15,6 +15,9 @@ function rec(
     itemClass: overrides.itemClass ?? null,
     category: null,
     isActive: null,
+    isWhitelisted: true,
+    buyerRank: null,
+    purchaseRule: null,
     quantityOnHand: 0,
     quantityAvailable: 0,
     quantityAllocated: 0,
@@ -31,10 +34,22 @@ function rec(
     maximumStockLevel: 0,
     annualDemandUnits: 0,
     avgDailyDemandUnits: 0,
+    rawAvgDailyDemandUnits: null,
+    stockoutMonthsExcluded: null,
+    abcClass: null,
+    turnoverRatio: null,
     unitCost: 0,
     supplierExternalId: null,
     vendorItemNumber: null,
     leadTimeDays: null,
+    effectiveLeadTimeDays: null,
+    leadTimeSource: null,
+    effectiveLeadTimeSupplierExternalId: null,
+    coverBands: {
+      criticalBelow: 1,
+      watchBelow: 2,
+      okBelow: 6,
+    },
     palletQty: null,
     containerQty: null,
     orderingCostPerOrder: null,
@@ -52,6 +67,7 @@ function rec(
     palletCount: null,
     status: "ok",
     dataGaps: [],
+    seasonality: null,
     ...overrides,
   };
 }
@@ -91,6 +107,7 @@ describe("classifyRecommendationsByTab", () => {
     const counts = buildReorderTabCounts(classified);
     expect(counts.reorderActionTotal).toBe(1);
     expect(counts.reorderActionNeedAttention).toBe(1);
+    expect(counts.overstockTotal).toBe(0);
     expect(counts.nonStockTotal).toBe(1);
     expect(counts.unclassifiedTotal).toBe(1);
   });

@@ -4,6 +4,7 @@ import { DashboardMetricCards } from "@/components/dashboard/dashboard-metric-ca
 import { SeasonalIntelligenceCard } from "@/components/dashboard/seasonal-intelligence-card";
 import { getRecentSyncRuns } from "@/lib/queries/connector-health";
 import { getDashboardStats } from "@/lib/queries/dashboard";
+import { getDataExceptions } from "@/lib/queries/exceptions";
 import { getPurchaseOrderList } from "@/lib/queries/purchase-orders";
 import { getLatestSeasonalIntelligence } from "@/lib/seasonality/service";
 import {
@@ -53,20 +54,24 @@ function buildSyncActivity(syncRuns: ConnectorSyncStatus[]) {
 }
 
 export default async function DashboardPage() {
-  const [stats, orders, syncRuns, seasonalIntelligence] = await Promise.all([
-    getDashboardStats(),
-    getPurchaseOrderList(),
-    getRecentSyncRuns(),
-    getLatestSeasonalIntelligence(),
-  ]);
+  const [stats, orders, syncRuns, seasonalIntelligence, exceptions] =
+    await Promise.all([
+      getDashboardStats(),
+      getPurchaseOrderList(),
+      getRecentSyncRuns(),
+      getLatestSeasonalIntelligence(),
+      getDataExceptions(),
+    ]);
 
   return (
     <div className="space-y-5">
       <DashboardMetricCards
         totalSkus={stats.totalSkus}
+        activeWorkflowSkuCount={stats.activeWorkflowSkuCount}
         totalInventoryValue={stats.totalInventoryValue}
         itemsBelowReorderLevel={stats.itemsBelowReorderLevel}
         criticalCount={stats.criticalCount}
+        exceptionsSummary={exceptions.summary}
       />
 
       <SeasonalIntelligenceCard initialRecord={seasonalIntelligence} />

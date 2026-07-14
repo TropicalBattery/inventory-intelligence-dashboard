@@ -6,6 +6,7 @@ export type BadgeVariant =
   | "danger"
   | "info"
   | "watch"
+  | "reorder"
   | "neutral";
 
 const variantClasses: Record<BadgeVariant, string> = {
@@ -13,7 +14,8 @@ const variantClasses: Record<BadgeVariant, string> = {
   warning: "bg-[#FFFBEB] text-[#B45309]",
   danger: "bg-[#FDF2F2] text-[#CC2B2B]",
   info: "bg-blue-50 text-[#2563EB]",
-  watch: "bg-[#E6F1FB] text-[#185FA5]",
+  watch: "border border-[#FDE68A] bg-[#FFFBEB] text-[#B45309]",
+  reorder: "border border-[#FDBA74] bg-[#FFF7ED] text-[#C2410C]",
   neutral: "bg-[#F3F4F6] text-[#6B7280]",
 };
 

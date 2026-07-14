@@ -71,6 +71,8 @@ Paragraph 1: current stock position and demand pattern (1-3 sentences).
 Paragraph 2: risk or trend observation, including velocity and stockout timing where relevant (1-3 sentences).
 Paragraph 3: clear recommendation or action for the buyer (1-2 sentences).
 
+When a seasonal peak is noted, consider ordering ahead of those months. Caveat that peaks are from roughly one year of monthly sales and may be a one-off spike, not proven annual seasonality.
+
 Weave inventory levels, reorder math, supplier timing, and sales velocity naturally. If data gaps or assumptions were used, mention them briefly in the relevant paragraph, not as a separate list.
 
 Item: ${rec.sku}${rec.name ? ` (${rec.name})` : ""}
@@ -82,6 +84,27 @@ Stock position:
 - Available: ${rec.quantityAvailable.toLocaleString("en-JM")} units
 - On order: ${rec.quantityOnOrder.toLocaleString("en-JM")} units
 - In pipeline: ${rec.quantityInPipeline.toLocaleString("en-JM")} units
+
+Demand:
+- Annual demand: ${
+    rec.annualDemandUnits !== null &&
+    rec.annualDemandUnits !== undefined &&
+    rec.annualDemandUnits > 0
+      ? `${rec.annualDemandUnits.toLocaleString("en-JM")} units`
+      : "not available"
+  }
+- Average daily demand: ${
+    rec.avgDailyDemandUnits !== null &&
+    rec.avgDailyDemandUnits !== undefined &&
+    rec.avgDailyDemandUnits > 0
+      ? `${rec.avgDailyDemandUnits.toLocaleString("en-JM")} units`
+      : "not available"
+  }
+- ${
+    rec.seasonality?.isSeasonal && rec.seasonality.peakLabel
+      ? `Seasonal pattern: peak ${rec.seasonality.peakLabel}, ${rec.seasonality.strength ?? "?"}x average (single-cycle evidence; do not claim it repeats every year)`
+      : `No seasonal pattern detected (${rec.seasonality?.historyMonths ?? 0} months history)`
+  }
 
 Reorder calculations (already computed, do not change):
 - EOQ: ${formatNullableNumber(rec.eoq, " units")}
@@ -237,6 +260,8 @@ export function buildReorderItemInputHash(
     quantityOnOrder: rec.quantityOnOrder,
     quantityInPipeline: rec.quantityInPipeline,
     leadTimeDays: rec.leadTimeDays,
+    annualDemandUnits: rec.annualDemandUnits,
+    avgDailyDemandUnits: rec.avgDailyDemandUnits,
     dataGaps: rec.dataGaps,
     trend: velocity?.trend ?? null,
     daysOfCover: velocity?.daysOfCover ?? null,

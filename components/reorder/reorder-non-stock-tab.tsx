@@ -208,15 +208,14 @@ export function ReorderNonStockTab({
         </div>
       </div>
 
-      <Card className="overflow-hidden p-0">
+      <Card className="rounded-2xl p-0">
         {filteredRows.length === 0 ? (
           <div className="px-6 py-10 text-center text-sm text-slate-500">
             No non-stock items match your filters.
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <Table containerClassName="rounded-none border-0">
+              <Table containerClassName="rounded-2xl border-0 !overflow-visible">
                 <colgroup>
                   <col className="w-36" />
                   <col />
@@ -225,7 +224,7 @@ export function ReorderNonStockTab({
                   <col className="w-28" />
                   <col className="w-36" />
                 </colgroup>
-                <TableHeader>
+                <TableHeader className="bg-[#F9FAFB] [&_th]:sticky [&_th]:top-[5.125rem] [&_th]:z-20 [&_th]:bg-[#F9FAFB]">
                   <TableRow className="hover:bg-transparent">
                     <TableHead className={`w-36 ${tableCellClassName}`}>
                       SKU
@@ -288,7 +287,6 @@ export function ReorderNonStockTab({
                   ))}
                 </TableBody>
               </Table>
-            </div>
 
             <div className="flex flex-col items-end gap-2 border-t border-slate-100 px-6 py-3 sm:flex-row sm:items-center sm:justify-end sm:gap-3">
               <button

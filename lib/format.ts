@@ -24,6 +24,14 @@ export function formatCurrencyJMD(value: number | null | undefined): string {
   return `J$${currencyFormatter.format(value)}`;
 }
 
+export function formatCurrencyUSD(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-";
+  }
+
+  return `US$${currencyFormatter.format(value)}`;
+}
+
 export function formatDurationMs(durationMs: number): string {
   if (durationMs < 0 || Number.isNaN(durationMs)) {
     return "N/A";

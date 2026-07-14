@@ -8,6 +8,10 @@ import {
   getMonthsOfCoverColorTier,
   getMonthsOfCoverTextClasses,
 } from "@/lib/reorder/months-of-cover";
+import {
+  resolveCoverBands,
+  type CoverBands,
+} from "@/lib/reorder/cover-thresholds";
 import type { ReorderRecommendation } from "@/lib/types";
 
 type MonthsOfCoverRec = Pick<
@@ -18,7 +22,13 @@ type MonthsOfCoverRec = Pick<
   | "annualDemandUnits"
   | "avgDailyDemandUnits"
   | "suggestedQtyRounded"
->;
+> & {
+  coverBands?: CoverBands;
+};
+
+function bandsFor(rec: MonthsOfCoverRec): CoverBands {
+  return rec.coverBands ?? resolveCoverBands(null);
+}
 
 type MonthsOfCoverDisplayProps = {
   rec: MonthsOfCoverRec;
@@ -30,13 +40,15 @@ type MonthsOfCoverDisplayProps = {
 function CoverValue({
   label,
   months,
+  bands,
   emphasized = false,
 }: {
   label: string;
   months: number | null;
+  bands: CoverBands;
   emphasized?: boolean;
 }) {
-  const tier = getMonthsOfCoverColorTier(months);
+  const tier = getMonthsOfCoverColorTier(months, bands);
   const textClass = getMonthsOfCoverTextClasses(tier);
 
   return (
@@ -64,7 +76,8 @@ export function CoverBadge({
   className?: string;
 }) {
   const months = computeCurrentMonthsOfCover(rec);
-  const tier = getMonthsOfCoverColorTier(months);
+  const bands = bandsFor(rec);
+  const tier = getMonthsOfCoverColorTier(months, bands);
 
   return (
     <span
@@ -87,6 +100,7 @@ export function MonthsOfCoverDisplay({
   variant = "compact",
   className,
 }: MonthsOfCoverDisplayProps) {
+  const bands = bandsFor(rec);
   const currentMonths = computeCurrentMonthsOfCover(rec);
   const projectedMonths =
     projectedOrderQty === undefined
@@ -103,10 +117,16 @@ export function MonthsOfCoverDisplay({
           .filter(Boolean)
           .join(" ")}
       >
-        <CoverValue label="Current cover" months={currentMonths} emphasized />
+        <CoverValue
+          label="Current cover"
+          months={currentMonths}
+          bands={bands}
+          emphasized
+        />
         <CoverValue
           label="After suggested order"
           months={projectedMonths}
+          bands={bands}
           emphasized
         />
       </div>
@@ -121,7 +141,7 @@ export function MonthsOfCoverDisplay({
         </span>
         <span
           className={`text-sm font-semibold tabular-nums ${getMonthsOfCoverTextClasses(
-            getMonthsOfCoverColorTier(currentMonths)
+            getMonthsOfCoverColorTier(currentMonths, bands)
           )}`}
         >
           {formatMonthsOfCoverLabel(currentMonths)}
@@ -133,7 +153,7 @@ export function MonthsOfCoverDisplay({
         </span>
         <span
           className={`text-sm font-semibold tabular-nums ${getMonthsOfCoverTextClasses(
-            getMonthsOfCoverColorTier(projectedMonths)
+            getMonthsOfCoverColorTier(projectedMonths, bands)
           )}`}
         >
           {formatMonthsOfCoverLabel(projectedMonths)}

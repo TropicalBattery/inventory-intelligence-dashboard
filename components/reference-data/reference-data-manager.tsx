@@ -599,7 +599,15 @@ export function ReferenceDataManager({
                   </TableCell>
                   <TableCell>{row.product_name ?? "-"}</TableCell>
                   <TableCell>
-                    {row.supplier_name ?? row.supplier_external_id}
+                    <div className="min-w-0">
+                      <p className="text-sm text-slate-900">
+                        {row.supplier_name?.trim() ||
+                          row.supplier_external_id}
+                      </p>
+                      <p className="font-mono text-xs text-slate-500">
+                        {row.supplier_external_id}
+                      </p>
+                    </div>
                   </TableCell>
                   <TableCell>
                     {isMissingQuote ? (

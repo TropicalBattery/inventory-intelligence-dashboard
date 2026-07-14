@@ -1,8 +1,17 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import { AiChatMessage } from "@/components/ai-chat/ai-chat-message";
+import { MAX_TURNS } from "@/lib/ai/chat-history";
 
 type ChatRole = "user" | "assistant";
 
@@ -32,11 +41,21 @@ export function AiChatSidebar({ isOpen, onClose }: AiChatSidebarProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => {
+  const userTurnCount = useMemo(
+    () => messages.filter((message) => message.role === "user").length,
+    [messages]
+  );
+  const turnLimitReached = userTurnCount >= MAX_TURNS;
+
+  const startNewChat = useCallback(() => {
     setMessages([]);
     setInput("");
     setIsLoading(false);
-  }, [pathname]);
+  }, []);
+
+  useEffect(() => {
+    startNewChat();
+  }, [pathname, startNewChat]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -45,16 +64,19 @@ export function AiChatSidebar({ isOpen, onClose }: AiChatSidebarProps) {
   const submitMessage = useCallback(
     async (rawMessage: string) => {
       const trimmed = rawMessage.trim();
-      if (!trimmed || isLoading) {
+      if (!trimmed || isLoading || turnLimitReached) {
         return;
       }
 
-      const nextMessages: ChatMessage[] = [
+      // Full session history as plain text (user + assistant). Tool
+      // exchanges stay server-side within one request; outcomes are in
+      // the assistant's text reply, which is kept in this array.
+      const allMessages: ChatMessage[] = [
         ...messages,
         { role: "user", content: trimmed },
       ];
 
-      setMessages(nextMessages);
+      setMessages(allMessages);
       setInput("");
       setIsLoading(true);
 
@@ -65,7 +87,7 @@ export function AiChatSidebar({ isOpen, onClose }: AiChatSidebarProps) {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            messages: nextMessages.map((message) => ({
+            messages: allMessages.map((message) => ({
               role: message.role,
               content: message.content,
             })),
@@ -97,7 +119,7 @@ export function AiChatSidebar({ isOpen, onClose }: AiChatSidebarProps) {
         setIsLoading(false);
       }
     },
-    [isLoading, messages]
+    [isLoading, messages, turnLimitReached]
   );
 
   function handleSubmit(event?: FormEvent<HTMLFormElement>) {
@@ -113,8 +135,10 @@ export function AiChatSidebar({ isOpen, onClose }: AiChatSidebarProps) {
   }
 
   return (
+    // Layering: header sticky z-40 → overlays z-40 → panels z-50
+    // (panels above header so close controls stay clickable)
     <aside
-      className={`fixed right-0 top-0 z-40 flex h-full w-[420px] flex-col border-l border-slate-200 bg-white transition-transform duration-300 ease-in-out dark:border-slate-700 dark:bg-slate-950 ${
+      className={`fixed right-0 top-0 z-50 flex h-full w-[420px] flex-col border-l border-slate-200 bg-white transition-transform duration-300 ease-in-out dark:border-slate-700 dark:bg-slate-950 ${
         isOpen ? "translate-x-0" : "translate-x-full"
       }`}
       aria-hidden={!isOpen}
@@ -132,14 +156,25 @@ export function AiChatSidebar({ isOpen, onClose }: AiChatSidebarProps) {
             Live data
           </span>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
-          aria-label="Close chat sidebar"
-        >
-          <i className="ti ti-x text-lg" aria-hidden="true" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={startNewChat}
+            className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+            aria-label="Start a new chat"
+            title="New chat"
+          >
+            <i className="ti ti-refresh text-lg" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+            aria-label="Close chat sidebar"
+          >
+            <i className="ti ti-x text-lg" aria-hidden="true" />
+          </button>
+        </div>
       </header>
 
       <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
@@ -154,7 +189,7 @@ export function AiChatSidebar({ isOpen, onClose }: AiChatSidebarProps) {
                 key={chip}
                 type="button"
                 onClick={() => void submitMessage(chip)}
-                disabled={isLoading}
+                disabled={isLoading || turnLimitReached}
                 className="cursor-pointer rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-700 hover:border-tbc-red hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-300 dark:hover:border-tbc-red dark:hover:bg-slate-800"
               >
                 {chip}
@@ -181,25 +216,43 @@ export function AiChatSidebar({ isOpen, onClose }: AiChatSidebarProps) {
 
       <form
         onSubmit={handleSubmit}
-        className="flex items-end gap-2 border-t border-slate-200 px-4 py-3 dark:border-slate-700"
+        className="border-t border-slate-200 px-4 py-3 dark:border-slate-700"
       >
-        <textarea
-          ref={textareaRef}
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Ask about your inventory..."
-          rows={1}
-          className="max-h-[120px] min-h-[40px] flex-1 resize-none rounded-2xl border border-transparent shadow-card bg-white px-3 py-2 text-sm text-slate-900 focus:border-tbc-red focus:outline-none focus:ring-2 focus:ring-tbc-red/20 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
-        />
-        <button
-          type="submit"
-          disabled={!input.trim() || isLoading}
-          className="flex h-9 w-9 items-center justify-center rounded-lg bg-tbc-red hover:bg-tbc-red-light0 disabled:cursor-not-allowed disabled:opacity-50"
-          aria-label="Send message"
-        >
-          <i className="ti ti-send text-sm text-white" aria-hidden="true" />
-        </button>
+        {turnLimitReached ? (
+          <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[#9CA3AF]">
+            <span>
+              This conversation has reached its length limit. Start a fresh
+              chat to continue.
+            </span>
+            <button
+              type="button"
+              onClick={startNewChat}
+              className="font-medium text-tbc-red hover:underline"
+            >
+              New chat
+            </button>
+          </div>
+        ) : null}
+        <div className="flex items-end gap-2">
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Ask about your inventory..."
+            rows={1}
+            disabled={turnLimitReached || isLoading}
+            className="max-h-[120px] min-h-[40px] flex-1 resize-none rounded-2xl border border-transparent shadow-card bg-white px-3 py-2 text-sm text-slate-900 focus:border-tbc-red focus:outline-none focus:ring-2 focus:ring-tbc-red/20 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+          />
+          <button
+            type="submit"
+            disabled={!input.trim() || isLoading || turnLimitReached}
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-tbc-red hover:bg-tbc-red-light0 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="Send message"
+          >
+            <i className="ti ti-send text-sm text-white" aria-hidden="true" />
+          </button>
+        </div>
       </form>
     </aside>
   );

@@ -6,6 +6,7 @@ import {
   calculateSafetyStock,
   calculateSuggestedQty,
   classifyReorderStatus,
+  computeTurnoverRatio,
   roundToPackSize,
 } from "@/lib/reorder-engine";
 import type { VwReorderInputsRow } from "@/lib/types";
@@ -30,18 +31,45 @@ function baseRow(overrides: Partial<VwReorderInputsRow> = {}): VwReorderInputsRo
     maximum_stock_level: 200,
     annual_demand_units: 1200,
     avg_daily_demand_units: 10,
+    raw_avg_daily_demand_units: null,
+    stockout_months_excluded: null,
     current_cost_local: 100,
     best_supplier_external_id: "SUP-1",
     best_unit_price: 95,
     lead_time_days: 7,
+    effective_lead_time_days: null,
+    lead_time_source: null,
+    effective_lead_time_supplier_external_id: null,
     safety_stock_months: null,
     pallet_qty: 24,
     container_qty: 50,
     ordering_cost_per_order: 100,
     holding_cost_per_unit_year: 2,
+    is_whitelisted: true,
+    buyer_rank: null,
+    purchase_rule: null,
+    seasonality: null,
     ...overrides,
   };
 }
+
+describe("computeTurnoverRatio", () => {
+  it("divides annual demand by on-hand quantity", () => {
+    expect(computeTurnoverRatio(1200, 200)).toBe(6);
+    expect(computeTurnoverRatio(100, 16)).toBe(6.25);
+  });
+
+  it("returns null when stock is zero or negative", () => {
+    expect(computeTurnoverRatio(1200, 0)).toBeNull();
+    expect(computeTurnoverRatio(1200, -5)).toBeNull();
+  });
+
+  it("returns null when demand is missing or zero", () => {
+    expect(computeTurnoverRatio(null, 50)).toBeNull();
+    expect(computeTurnoverRatio(0, 50)).toBeNull();
+    expect(computeTurnoverRatio(undefined, 50)).toBeNull();
+  });
+});
 
 describe("calculateEOQ", () => {
   it("calculates EOQ with full valid inputs", () => {
@@ -132,7 +160,7 @@ describe("calculateSuggestedQty", () => {
       quantityOnOrder: 0,
       quantityInPipeline: 0,
       rop: 105,
-      reorderLevel: 5274,
+      reorderLevel: 2000,
       maximumStockLevel: null,
       eoq: null,
       avgDailyDemandUnits: 10,
@@ -170,7 +198,7 @@ describe("calculateSuggestedQty", () => {
     );
   });
 
-  it("returns zero when reorder_level exceeds sanity cap (96L928 pattern)", () => {
+  it("treats dirty 5274 sentinel as unset and uses demand-based default", () => {
     const result = calculateSuggestedQty({
       quantityAvailable: 0,
       quantityOnOrder: 0,
@@ -186,11 +214,10 @@ describe("calculateSuggestedQty", () => {
       annualDemandUnits: 107,
     });
 
-    expect(result.suggestedQty).toBe(0);
+    // 0.29315 * 30.44 * 3 ≈ 26.77
+    expect(result.suggestedQty).toBeCloseTo(26.77, 1);
     expect(
-      result.dataGaps.some((gap) =>
-        gap.includes("Insufficient demand, cost, or lead time")
-      )
+      result.dataGaps.some((gap) => gap.includes("default reorder level"))
     ).toBe(true);
   });
 
@@ -213,36 +240,137 @@ describe("calculateSuggestedQty", () => {
     expect(result.suggestedQty).toBe(0);
     expect(
       result.dataGaps.some((gap) =>
-        gap.includes("Insufficient demand, cost, or lead time")
+        gap.includes("No demand data - suggested quantity not calculated")
+      )
+    ).toBe(true);
+  });
+
+  it("uses default reorder level when GP reorder_level is 0 and demand exists", () => {
+    const result = calculateSuggestedQty({
+      quantityAvailable: 0,
+      quantityOnOrder: 0,
+      quantityInPipeline: 0,
+      rop: null,
+      reorderLevel: 0,
+      maximumStockLevel: 0,
+      eoq: null,
+      avgDailyDemandUnits: 12.161643,
+      leadTimeDays: null,
+      orderingCostPerOrder: null,
+      holdingCostPerUnitYear: null,
+      annualDemandUnits: 4439,
+    });
+
+    expect(result.suggestedQty).toBeCloseTo(1110.6, 1);
+    expect(
+      result.dataGaps.some((gap) => gap.includes("Using default reorder level"))
+    ).toBe(true);
+  });
+
+  it("reports missing cost/lead time when demand exists but no qty basis", () => {
+    const result = calculateSuggestedQty({
+      quantityAvailable: 0,
+      quantityOnOrder: 0,
+      quantityInPipeline: 0,
+      rop: null,
+      reorderLevel: null,
+      maximumStockLevel: 0,
+      eoq: null,
+      avgDailyDemandUnits: null,
+      leadTimeDays: null,
+      orderingCostPerOrder: null,
+      holdingCostPerUnitYear: null,
+      annualDemandUnits: 1200,
+    });
+
+    expect(result.suggestedQty).toBe(0);
+    expect(
+      result.dataGaps.some((gap) =>
+        gap.includes(
+          "Demand known but missing cost and lead time inputs - suggested quantity not calculated"
+        )
       )
     ).toBe(true);
   });
 });
 
 describe("classifyReorderStatus", () => {
-  const activeSignals = {
-    annualDemandUnits: 1200,
-    reorderLevel: 50,
-    quantityOnHand: 10,
-    quantityOnOrder: 5,
+  const base = {
+    quantityOnOrder: 0,
+    quantityInPipeline: 0,
+    rop: null,
+    reorderLevel: null,
+    suggestedQty: 0,
+    annualDemandUnits: 1200, // 100 units / month
+    quantityOnHand: 100,
     unitCost: 100,
   };
 
   it("marks stockouts as critical when demand exists", () => {
     expect(
       classifyReorderStatus({
-        ...activeSignals,
+        ...base,
         quantityAvailable: 0,
-        quantityOnOrder: 50,
-        quantityInPipeline: 20,
-        rop: 100,
-        reorderLevel: 40,
-        suggestedQty: 80,
+        quantityOnHand: 0,
+        quantityAllocated: 0,
+        quantityInPipeline: 50,
       })
     ).toBe("critical");
   });
 
-  it("marks zero-stock items with reorder level but no demand as watch", () => {
+  it("marks under 1 month of cover as critical", () => {
+    // position = 40 → 0.4 months
+    expect(
+      classifyReorderStatus({
+        ...base,
+        quantityAvailable: 40,
+        quantityOnHand: 40,
+        quantityAllocated: 0,
+        quantityInPipeline: 0,
+      })
+    ).toBe("critical");
+  });
+
+  it("marks 1-2 months of cover as watch", () => {
+    // position = 150 → 1.5 months
+    expect(
+      classifyReorderStatus({
+        ...base,
+        quantityAvailable: 150,
+        quantityOnHand: 150,
+        quantityAllocated: 0,
+        quantityInPipeline: 0,
+      })
+    ).toBe("watch");
+  });
+
+  it("marks 2-6 months of cover as reorder_needed", () => {
+    // position = 300 → 3 months
+    expect(
+      classifyReorderStatus({
+        ...base,
+        quantityAvailable: 300,
+        quantityOnHand: 300,
+        quantityAllocated: 0,
+        quantityInPipeline: 0,
+      })
+    ).toBe("reorder_needed");
+  });
+
+  it("marks 6+ months of cover as ok", () => {
+    // position = 700 → 7 months
+    expect(
+      classifyReorderStatus({
+        ...base,
+        quantityAvailable: 700,
+        quantityOnHand: 700,
+        quantityAllocated: 0,
+        quantityInPipeline: 0,
+      })
+    ).toBe("ok");
+  });
+
+  it("returns no_demand when there is no demand signal", () => {
     expect(
       classifyReorderStatus({
         quantityAvailable: 0,
@@ -254,50 +382,6 @@ describe("classifyReorderStatus", () => {
         annualDemandUnits: 0,
         quantityOnHand: 0,
         unitCost: 100,
-      })
-    ).toBe("watch");
-  });
-
-  it("marks below-reorder stock with demand as reorder_needed", () => {
-    expect(
-      classifyReorderStatus({
-        ...activeSignals,
-        quantityAvailable: 20,
-        quantityOnOrder: 0,
-        quantityInPipeline: 0,
-        rop: 100,
-        reorderLevel: 50,
-        suggestedQty: 80,
-      })
-    ).toBe("reorder_needed");
-  });
-
-  it("marks healthy stock as ok when demand exists", () => {
-    expect(
-      classifyReorderStatus({
-        ...activeSignals,
-        quantityAvailable: 80,
-        quantityOnOrder: 20,
-        quantityInPipeline: 10,
-        rop: 100,
-        reorderLevel: 40,
-        suggestedQty: 0,
-      })
-    ).toBe("ok");
-  });
-
-  it("returns no_demand when demand and actionable stock signals are absent", () => {
-    expect(
-      classifyReorderStatus({
-        quantityAvailable: 0,
-        quantityOnOrder: 0,
-        quantityInPipeline: 0,
-        rop: null,
-        reorderLevel: 0,
-        suggestedQty: 0,
-        annualDemandUnits: 0,
-        quantityOnHand: 0,
-        unitCost: 0,
       })
     ).toBe("no_demand");
   });
@@ -361,14 +445,17 @@ describe("buildReorderRecommendation", () => {
     expect(recommendation.suggestedQtyRounded).toBe(350);
     expect(recommendation.roundingUnit).toBe("container");
     expect(recommendation.containerCount).toBe(7);
-    expect(recommendation.status).toBe("reorder_needed");
+    expect(recommendation.status).toBe("critical");
+    expect(recommendation.turnoverRatio).toBeCloseTo(1200 / 35, 2);
   });
 
   it("uses months-of-demand safety stock for foreign suppliers", () => {
     const recommendation = buildReorderRecommendation(
       baseRow({
         lead_time_days: 90,
-        safety_stock_months: 3,
+    effective_lead_time_days: null,
+    lead_time_source: null,
+    effective_lead_time_supplier_external_id: null,        safety_stock_months: 3,
       })
     );
 
@@ -398,7 +485,9 @@ describe("buildReorderRecommendation", () => {
     const recommendation = buildReorderRecommendation(
       baseRow({
         lead_time_days: null,
-        maximum_stock_level: null,
+    effective_lead_time_days: null,
+    lead_time_source: null,
+    effective_lead_time_supplier_external_id: null,        maximum_stock_level: null,
         ordering_cost_per_order: null,
         holding_cost_per_unit_year: null,
       })
@@ -430,13 +519,16 @@ describe("buildReorderRecommendation", () => {
         ordering_cost_per_order: null,
         holding_cost_per_unit_year: null,
         lead_time_days: null,
-        container_qty: null,
+    effective_lead_time_days: null,
+    lead_time_source: null,
+    effective_lead_time_supplier_external_id: null,        container_qty: null,
         pallet_qty: null,
       })
     );
 
-    expect(recommendation.suggestedQtyRaw).toBe(0);
-    expect(recommendation.suggestedQtyRounded).toBe(0);
+    expect(recommendation.reorderLevel).toBeNull();
+    expect(recommendation.suggestedQtyRaw).toBeCloseTo(26.77, 1);
+    expect(recommendation.suggestedQtyRounded).toBeGreaterThan(0);
   });
 
   it("returns zero when only anomalous reorder_level exists without demand inputs (96807L pattern)", () => {
@@ -457,7 +549,9 @@ describe("buildReorderRecommendation", () => {
         ordering_cost_per_order: null,
         holding_cost_per_unit_year: null,
         lead_time_days: null,
-      })
+    effective_lead_time_days: null,
+    lead_time_source: null,
+    effective_lead_time_supplier_external_id: null,      })
     );
 
     expect(recommendation.suggestedQtyRaw).toBe(0);
@@ -474,29 +568,74 @@ describe("buildReorderRecommendation", () => {
         ordering_cost_per_order: null,
         holding_cost_per_unit_year: null,
         lead_time_days: null,
-      })
+    effective_lead_time_days: null,
+    lead_time_source: null,
+    effective_lead_time_supplier_external_id: null,      })
     );
 
+    expect(recommendation.reorderLevel).toBeNull();
     expect(recommendation.suggestedQtyRaw).toBe(0);
     expect(recommendation.suggestedQtyRounded).toBe(0);
+    expect(
+      recommendation.dataGaps.some((gap) =>
+        gap.includes("No demand data - suggested quantity not calculated")
+      )
+    ).toBe(true);
   });
 
-  it("returns ok status when effective stock is above ROP", () => {
+  it("uses default reorder level when GP reorder_level is 0 but demand exists (AW-095)", () => {
     const recommendation = buildReorderRecommendation(
       baseRow({
-        quantity_on_hand: 100,
-        quantity_available: 80,
-        quantity_allocated: 20,
-        effective_available: 90,
-        quantity_on_order: 20,
-        quantity_in_transit: 10,
+        sku: "AW-095",
+        quantity_on_hand: 570,
+        quantity_available: 484,
+        quantity_allocated: 86,
+        effective_available: 484,
+        quantity_on_order: 0,
+        quantity_in_transit: 0,
         quantity_in_bond: 0,
         quantity_at_port: 0,
         quantity_in_clearing: 0,
+        reorder_level: 0,
+        maximum_stock_level: 0,
+        annual_demand_units: 4439,
+        avg_daily_demand_units: 12.161643,
+        ordering_cost_per_order: null,
+        holding_cost_per_unit_year: null,
+        lead_time_days: null,
+    effective_lead_time_days: null,
+    lead_time_source: null,
+    effective_lead_time_supplier_external_id: null,        container_qty: null,
+        pallet_qty: null,
       })
     );
 
-    expect(recommendation.suggestedQtyRaw).toBe(0);
+    expect(recommendation.reorderLevel).toBeNull();
+    expect(recommendation.suggestedQtyRaw).toBeCloseTo(1110.6, 1);
+    expect(recommendation.suggestedQtyRounded).toBeGreaterThan(0);
+    expect(
+      recommendation.dataGaps.some((gap) =>
+        gap.includes("Using default reorder level")
+      )
+    ).toBe(true);
+  });
+
+  it("returns ok status when months of cover is 6 or more", () => {
+    const recommendation = buildReorderRecommendation(
+      baseRow({
+        quantity_on_hand: 700,
+        quantity_available: 700,
+        quantity_allocated: 0,
+        effective_available: 700,
+        quantity_on_order: 0,
+        quantity_in_transit: 0,
+        quantity_in_bond: 0,
+        quantity_at_port: 0,
+        quantity_in_clearing: 0,
+        annual_demand_units: 1200,
+      })
+    );
+
     expect(recommendation.status).toBe("ok");
   });
 
@@ -540,7 +679,7 @@ describe("buildReorderRecommendation", () => {
     expect(recommendation.status).toBe("no_demand");
   });
 
-  it("returns watch for zero-stock items with reorder level but no demand", () => {
+  it("returns no_demand for zero-stock items with reorder level but no demand", () => {
     const recommendation = buildReorderRecommendation(
       baseRow({
         sku: "96807L",
@@ -558,10 +697,12 @@ describe("buildReorderRecommendation", () => {
         ordering_cost_per_order: null,
         holding_cost_per_unit_year: null,
         lead_time_days: null,
-      })
+    effective_lead_time_days: null,
+    lead_time_source: null,
+    effective_lead_time_supplier_external_id: null,      })
     );
 
-    expect(recommendation.status).toBe("watch");
+    expect(recommendation.status).toBe("no_demand");
   });
 
   it("returns no_demand for service-style items with no demand or stock signals", () => {

@@ -4,9 +4,7 @@ import Link from "next/link";
 import { Download, Eye, Send } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { Badge } from "@/components/ui/Badge";
 import { Modal } from "@/components/ui/Modal";
-import { getPoStatusBadgeVariant, getPoStatusLabel } from "@/lib/po-status-ui";
 import type { PurchaseOrderListItem } from "@/lib/types";
 
 type PoListRowActionsProps = {
@@ -14,7 +12,7 @@ type PoListRowActionsProps = {
 };
 
 const iconButtonClassName =
-  "inline-flex h-8 w-8 items-center justify-center rounded-2xl border border-transparent shadow-card bg-white text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex h-8 w-8 items-center justify-center rounded-2xl border border-transparent bg-white text-slate-600 shadow-card transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50";
 
 export function PoListRowActions({ order }: PoListRowActionsProps) {
   const router = useRouter();
@@ -25,7 +23,7 @@ export function PoListRowActions({ order }: PoListRowActionsProps) {
 
   const pdfUrl = `/api/purchase-orders/${order.id}/pdf`;
   const canSend =
-    status !== "sent" && Boolean(order.supplierEmail?.trim());
+    status === "approved" && Boolean(order.supplierEmail?.trim());
 
   function handleSendEmail() {
     setErrorMessage(null);
@@ -125,13 +123,5 @@ export function PoListRowActions({ order }: PoListRowActionsProps) {
         </div>
       </Modal>
     </>
-  );
-}
-
-export function PoListStatusBadge({ status }: { status: string }) {
-  return (
-    <Badge variant={getPoStatusBadgeVariant(status)}>
-      {getPoStatusLabel(status)}
-    </Badge>
   );
 }

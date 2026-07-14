@@ -56,11 +56,13 @@ describe("computeCurrentMonthsOfCover", () => {
 });
 
 describe("getMonthsOfCoverColorTier", () => {
-  it("maps thresholds to red, amber, and green", () => {
-    expect(getMonthsOfCoverColorTier(1.5)).toBe("red");
-    expect(getMonthsOfCoverColorTier(2)).toBe("amber");
-    expect(getMonthsOfCoverColorTier(3.9)).toBe("amber");
-    expect(getMonthsOfCoverColorTier(4)).toBe("green");
+  it("maps cover bands to red, amber, orange, and green", () => {
+    expect(getMonthsOfCoverColorTier(0.4)).toBe("red");
+    expect(getMonthsOfCoverColorTier(1)).toBe("amber");
+    expect(getMonthsOfCoverColorTier(1.5)).toBe("amber");
+    expect(getMonthsOfCoverColorTier(2)).toBe("orange");
+    expect(getMonthsOfCoverColorTier(5.9)).toBe("orange");
+    expect(getMonthsOfCoverColorTier(6)).toBe("green");
     expect(getMonthsOfCoverColorTier(null)).toBe("unknown");
   });
 });

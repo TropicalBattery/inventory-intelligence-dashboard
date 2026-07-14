@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Package, Search } from "lucide-react";
+import { DataFreshnessBadge } from "@/components/shared/data-freshness-badge";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -17,14 +18,14 @@ import {
 } from "@/components/ui/Table";
 import { formatNumber } from "@/lib/format";
 import {
+  summarizeInventoryStats,
+  type InventoryItem,
+  type InventoryLocationBalance,
+} from "@/lib/queries/inventory";
+import {
   getStatusBadgeVariant,
   getStatusLabel,
 } from "@/lib/reorder-status-ui";
-import type {
-  InventoryItem,
-  InventoryLocationBalance,
-  InventoryStats,
-} from "@/lib/queries/inventory";
 import type { ReorderStatus } from "@/lib/types";
 
 type InventoryTableProps = {
@@ -32,10 +33,9 @@ type InventoryTableProps = {
   locationsBySku: Record<string, InventoryLocationBalance[]>;
   page: number;
   pageSize: number;
-  totalCount: number;
   showInactive: boolean;
   inactiveHiddenCount: number;
-  stats: InventoryStats;
+  lastInventorySyncAt: string | null;
 };
 
 type StatusFilter =
@@ -59,6 +59,15 @@ const STATUS_ORDER: Record<ReorderStatus, number> = {
   no_demand: 4,
 };
 
+const COLUMN_COUNT = 8;
+
+/**
+ * Sticky under the app TopBar (py-4 + title + optional subtitle + border ≈ 5.125rem).
+ * Same offset as the reorder tables.
+ */
+const STICKY_TH_CLASS =
+  "sticky top-[5.125rem] z-20 border-b border-[#E5E7EB] bg-[#F9FAFB] !whitespace-normal";
+
 function matchesStatusFilter(
   status: ReorderStatus,
   filter: StatusFilter
@@ -78,10 +87,6 @@ function matchesStatusFilter(
   return status === filter;
 }
 
-function formatClassCategory(itemClass: string | null, category: string | null): string {
-  return [itemClass, category].filter(Boolean).join(" / ");
-}
-
 function inventoryPageHref(page: number, showInactive: boolean): string {
   const params = new URLSearchParams();
 
@@ -97,15 +102,41 @@ function inventoryPageHref(page: number, showInactive: boolean): string {
   return queryString ? `/inventory?${queryString}` : "/inventory";
 }
 
+function ClassCategoryCell({
+  itemClass,
+  category,
+}: {
+  itemClass: string | null;
+  category: string | null;
+}) {
+  if (!itemClass && !category) {
+    return <span className="text-[#9CA3AF]">-</span>;
+  }
+
+  const title = [itemClass, category].filter(Boolean).join(" / ");
+
+  return (
+    <div className="min-w-0 space-y-0.5" title={title}>
+      {itemClass ? (
+        <p className="truncate text-xs font-medium text-slate-800">
+          {itemClass}
+        </p>
+      ) : null}
+      {category ? (
+        <p className="truncate text-xs text-slate-500">{category}</p>
+      ) : null}
+    </div>
+  );
+}
+
 export function InventoryTable({
   items,
   locationsBySku,
   page,
   pageSize,
-  totalCount,
   showInactive,
   inactiveHiddenCount,
-  stats,
+  lastInventorySyncAt,
 }: InventoryTableProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -127,6 +158,16 @@ export function InventoryTable({
     router.push(`/inventory?${params.toString()}`);
   }
 
+  function resetToFirstPage() {
+    if (page <= 1) {
+      return;
+    }
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("page");
+    const queryString = params.toString();
+    router.replace(queryString ? `/inventory?${queryString}` : "/inventory");
+  }
+
   const classOptions = useMemo(() => {
     const values = new Set<string>();
 
@@ -139,11 +180,44 @@ export function InventoryTable({
     return Array.from(values).sort((left, right) => left.localeCompare(right));
   }, [items]);
 
-  const filteredRows = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
+  const hasSearchQuery = searchQuery.trim().length > 0;
+  const normalizedQuery = searchQuery.trim().toLowerCase();
 
+  /** Inactive + status + class (search excluded) — drives the stats strip. */
+  const statsRows = useMemo(() => {
+    return items.filter((item) => {
+      if (!showInactive && item.isInactive) {
+        return false;
+      }
+
+      if (!matchesStatusFilter(item.recommendation.status, statusFilter)) {
+        return false;
+      }
+
+      if (
+        classFilter !== "all" &&
+        item.recommendation.itemClass !== classFilter
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [items, showInactive, statusFilter, classFilter]);
+
+  const stats = useMemo(
+    () => summarizeInventoryStats(statsRows),
+    [statsRows]
+  );
+
+  const filteredRows = useMemo(() => {
     const rows = items.filter((item) => {
       const { recommendation } = item;
+
+      // Empty search: respect Show inactive. Non-empty search: include inactive.
+      if (!hasSearchQuery && !showInactive && item.isInactive) {
+        return false;
+      }
 
       if (!matchesStatusFilter(recommendation.status, statusFilter)) {
         return false;
@@ -153,16 +227,29 @@ export function InventoryTable({
         return false;
       }
 
-      if (!query) {
+      if (!normalizedQuery) {
         return true;
       }
 
-      const skuMatch = recommendation.sku.toLowerCase().includes(query);
-      const nameMatch = recommendation.name?.toLowerCase().includes(query) ?? false;
+      const skuLower = recommendation.sku.toLowerCase();
+      const skuMatch =
+        skuLower === normalizedQuery || skuLower.includes(normalizedQuery);
+      const nameMatch =
+        recommendation.name?.toLowerCase().includes(normalizedQuery) ?? false;
       return skuMatch || nameMatch;
     });
 
     return rows.sort((left, right) => {
+      if (normalizedQuery) {
+        const leftExact =
+          left.recommendation.sku.toLowerCase() === normalizedQuery ? 0 : 1;
+        const rightExact =
+          right.recommendation.sku.toLowerCase() === normalizedQuery ? 0 : 1;
+        if (leftExact !== rightExact) {
+          return leftExact - rightExact;
+        }
+      }
+
       const statusDiff =
         STATUS_ORDER[left.recommendation.status] -
         STATUS_ORDER[right.recommendation.status];
@@ -173,22 +260,43 @@ export function InventoryTable({
 
       return left.recommendation.sku.localeCompare(right.recommendation.sku);
     });
-  }, [items, searchQuery, statusFilter, classFilter]);
+  }, [
+    items,
+    hasSearchQuery,
+    normalizedQuery,
+    showInactive,
+    statusFilter,
+    classFilter,
+  ]);
 
+  const totalCount = filteredRows.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
-  const cataloguePageStart =
-    totalCount === 0 ? 0 : (page - 1) * pageSize + 1;
-  const cataloguePageEnd = Math.min(page * pageSize, totalCount);
-  const isFirstPage = page <= 1;
-  const isLastPage = page >= totalPages;
+  const safePage = Math.min(page, totalPages);
+  const pageStartIndex = (safePage - 1) * pageSize;
+  const pageRows = filteredRows.slice(
+    pageStartIndex,
+    pageStartIndex + pageSize
+  );
+  const cataloguePageStart = totalCount === 0 ? 0 : pageStartIndex + 1;
+  const cataloguePageEnd = Math.min(pageStartIndex + pageSize, totalCount);
+  const isFirstPage = safePage <= 1;
+  const isLastPage = safePage >= totalPages;
+
+  useEffect(() => {
+    if (page > totalPages && totalPages >= 1) {
+      resetToFirstPage();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, totalPages]);
 
   function clearFilters() {
     setSearchQuery("");
     setStatusFilter("all");
     setClassFilter("all");
+    resetToFirstPage();
   }
 
-  if (totalCount === 0) {
+  if (items.length === 0) {
     return (
       <div className="space-y-6">
         <EmptyState
@@ -210,13 +318,14 @@ export function InventoryTable({
 
   return (
     <div className="space-y-6">
-      {!showInactive && inactiveHiddenCount > 0 ? (
-        <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        {!showInactive && inactiveHiddenCount > 0 ? (
           <Badge variant="neutral">
             {formatNumber(inactiveHiddenCount)} inactive items hidden
           </Badge>
-        </div>
-      ) : null}
+        ) : null}
+        <DataFreshnessBadge lastSyncAt={lastInventorySyncAt} />
+      </div>
 
       <div className="flex flex-wrap items-end gap-4 rounded-2xl border border-transparent bg-white p-4 shadow-card">
         <div className="min-w-[220px] flex-1">
@@ -235,7 +344,12 @@ export function InventoryTable({
               id="inventory-search"
               type="search"
               value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
+              onChange={(event) => {
+                setSearchQuery(event.target.value);
+                if (page > 1) {
+                  resetToFirstPage();
+                }
+              }}
               placeholder="Search SKU or name"
               className="h-10 w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-slate-900 focus:border-tbc-red focus:outline-none focus:ring-2 focus:ring-tbc-red/20"
             />
@@ -252,9 +366,12 @@ export function InventoryTable({
           <select
             id="inventory-status-filter"
             value={statusFilter}
-            onChange={(event) =>
-              setStatusFilter(event.target.value as StatusFilter)
-            }
+            onChange={(event) => {
+              setStatusFilter(event.target.value as StatusFilter);
+              if (page > 1) {
+                resetToFirstPage();
+              }
+            }}
             className={`${filterSelectClassName} w-full min-w-[180px]`}
           >
             <option value="all">All</option>
@@ -275,7 +392,12 @@ export function InventoryTable({
           <select
             id="inventory-class-filter"
             value={classFilter}
-            onChange={(event) => setClassFilter(event.target.value)}
+            onChange={(event) => {
+              setClassFilter(event.target.value);
+              if (page > 1) {
+                resetToFirstPage();
+              }
+            }}
             className={`${filterSelectClassName} w-full min-w-[180px]`}
           >
             <option value="all">All classes</option>
@@ -291,7 +413,7 @@ export function InventoryTable({
           <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
             Inactive items
           </label>
-          <label className="flex h-10 items-center gap-2 rounded-2xl border border-transparent shadow-card bg-white px-3 text-sm text-slate-700">
+          <label className="flex h-10 items-center gap-2 rounded-2xl border border-transparent bg-white px-3 text-sm text-slate-700 shadow-card">
             <input
               type="checkbox"
               checked={showInactive}
@@ -308,7 +430,7 @@ export function InventoryTable({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-transparent shadow-card bg-white px-4 py-3 text-sm text-slate-600">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-transparent bg-white px-4 py-3 text-sm text-slate-600 shadow-card">
         <span>
           Total:{" "}
           <strong className="font-semibold text-slate-900">
@@ -338,11 +460,11 @@ export function InventoryTable({
         </span>
       </div>
 
-      <Card className="overflow-hidden p-0">
+      <Card className="w-full max-w-full overflow-visible rounded-2xl p-0">
         {totalCount > 0 ? (
           <p className="border-b border-slate-100 px-6 py-3 text-sm text-slate-600">
-            Showing {formatNumber(cataloguePageStart)}-{formatNumber(cataloguePageEnd)} of{" "}
-            {formatNumber(totalCount)} items
+            Showing {formatNumber(cataloguePageStart)}-
+            {formatNumber(cataloguePageEnd)} of {formatNumber(totalCount)} items
           </p>
         ) : null}
 
@@ -354,213 +476,248 @@ export function InventoryTable({
             <button
               type="button"
               onClick={clearFilters}
-              className="rounded-2xl border border-transparent shadow-card bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="rounded-2xl border border-transparent bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-card hover:bg-slate-50"
             >
               Clear filters
             </button>
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <Table
-                containerClassName="w-max min-w-full rounded-none border-0 shadow-none !overflow-visible"
-                className="min-w-[1180px]"
-              >
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="w-[132px] px-5">SKU</TableHead>
-                    <TableHead className="min-w-[200px] px-5">Product Name</TableHead>
-                    <TableHead className="min-w-[160px] px-5">
-                      Class / Category
-                    </TableHead>
-                    <TableHead className="w-[108px] px-5 text-right">
-                      Qty Available
-                    </TableHead>
-                    <TableHead className="w-[108px] px-5 text-right">
-                      Qty On Hand
-                    </TableHead>
-                    <TableHead className="w-[108px] px-5 text-right">
-                      Qty On Order
-                    </TableHead>
-                    <TableHead className="w-[108px] px-5 text-right">
-                      Reorder Level
-                    </TableHead>
-                    <TableHead className="w-[120px] px-5 text-right">
-                      Max Stock Level
-                    </TableHead>
-                    <TableHead className="w-[128px] px-5">Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredRows.map(({ recommendation }) => {
-                    const classCategory = formatClassCategory(
-                      recommendation.itemClass,
-                      recommendation.category
-                    );
-                    const locations = locationsBySku[recommendation.sku] ?? [];
-                    const isExpanded = expandedSku === recommendation.sku;
-                    const availableIsZero = recommendation.quantityAvailable <= 0;
+            <Table
+              containerClassName="w-full max-w-full rounded-none border-0 shadow-none !overflow-visible"
+              className="table-fixed w-full"
+            >
+              <colgroup>
+                <col className="w-32" />
+                <col />
+                <col className="w-40" />
+                <col className="w-24" />
+                <col className="w-24" />
+                <col className="w-24" />
+                <col className="w-24" />
+                <col className="w-28" />
+              </colgroup>
+              <TableHeader className="bg-[#F9FAFB]">
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className={`${STICKY_TH_CLASS} px-3`}>
+                    SKU
+                  </TableHead>
+                  <TableHead className={`${STICKY_TH_CLASS} px-3`}>
+                    Product Name
+                  </TableHead>
+                  <TableHead className={`${STICKY_TH_CLASS} px-3`}>
+                    Class / Category
+                  </TableHead>
+                  <TableHead
+                    className={`${STICKY_TH_CLASS} px-2 text-right`}
+                  >
+                    Qty Avail
+                  </TableHead>
+                  <TableHead
+                    className={`${STICKY_TH_CLASS} px-2 text-right`}
+                  >
+                    On Hand
+                  </TableHead>
+                  <TableHead
+                    className={`${STICKY_TH_CLASS} px-2 text-right`}
+                  >
+                    On Order
+                  </TableHead>
+                  <TableHead
+                    className={`${STICKY_TH_CLASS} px-2 text-right`}
+                  >
+                    Reorder Lvl
+                  </TableHead>
+                  <TableHead className={`${STICKY_TH_CLASS} px-3`}>
+                    Status
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pageRows.map((item) => {
+                  const { recommendation, isInactive } = item;
+                  const locations = locationsBySku[recommendation.sku] ?? [];
+                  const isExpanded = expandedSku === recommendation.sku;
+                  const availableIsZero =
+                    recommendation.quantityAvailable <= 0;
 
-                    return (
-                      <Fragment key={recommendation.sku}>
-                        <TableRow
-                          className="cursor-pointer [&>td]:py-2.5"
-                          onClick={() =>
-                            setExpandedSku((current) =>
-                              current === recommendation.sku
-                                ? null
-                                : recommendation.sku
-                            )
-                          }
+                  return (
+                    <Fragment key={recommendation.sku}>
+                      <TableRow
+                        className="cursor-pointer [&>td]:py-2.5"
+                        onClick={() =>
+                          setExpandedSku((current) =>
+                            current === recommendation.sku
+                              ? null
+                              : recommendation.sku
+                          )
+                        }
+                      >
+                        <TableCell className="px-3 align-top">
+                          <div className="min-w-0 space-y-1">
+                            <p className="break-words font-mono text-xs font-semibold text-slate-900">
+                              {recommendation.sku}
+                            </p>
+                            {isInactive ? (
+                              <span className="inline-block rounded-full border border-[#E5E7EB] bg-[#F3F4F6] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[#9CA3AF]">
+                                Inactive
+                              </span>
+                            ) : null}
+                          </div>
+                        </TableCell>
+                        <TableCell
+                          className="min-w-0 px-3 align-top"
+                          title={recommendation.name ?? undefined}
                         >
-                          <TableCell className="px-5 font-mono text-sm font-semibold text-slate-900">
-                            {recommendation.sku}
-                          </TableCell>
-                          <TableCell
-                            className="max-w-[280px] px-5"
-                            title={recommendation.name ?? undefined}
+                          <span className="block truncate text-sm text-slate-800">
+                            {recommendation.name ?? "-"}
+                          </span>
+                        </TableCell>
+                        <TableCell className="min-w-0 px-3 align-top">
+                          <ClassCategoryCell
+                            itemClass={recommendation.itemClass}
+                            category={recommendation.category}
+                          />
+                        </TableCell>
+                        <TableCell
+                          className={`px-2 text-right align-top tabular-nums ${
+                            availableIsZero
+                              ? "font-semibold text-red-600"
+                              : "text-slate-900"
+                          }`}
+                        >
+                          {formatNumber(recommendation.quantityAvailable)}
+                        </TableCell>
+                        <TableCell className="px-2 text-right align-top tabular-nums text-slate-900">
+                          {formatNumber(recommendation.quantityOnHand)}
+                        </TableCell>
+                        <TableCell className="px-2 text-right align-top tabular-nums text-slate-900">
+                          {formatNumber(recommendation.quantityOnOrder)}
+                        </TableCell>
+                        <TableCell className="px-2 text-right align-top tabular-nums text-slate-700">
+                          {recommendation.reorderLevel !== null
+                            ? formatNumber(recommendation.reorderLevel)
+                            : "-"}
+                        </TableCell>
+                        <TableCell className="px-3 align-top">
+                          <Badge
+                            variant={getStatusBadgeVariant(
+                              recommendation.status
+                            )}
                           >
-                            <span className="line-clamp-1">
-                              {recommendation.name ?? "-"}
-                            </span>
-                          </TableCell>
+                            {getStatusLabel(recommendation.status)}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                      {isExpanded ? (
+                        <TableRow
+                          key={`${recommendation.sku}-details`}
+                          className="bg-slate-50 hover:bg-slate-50"
+                        >
                           <TableCell
-                            className="max-w-[220px] truncate px-5 text-slate-700"
-                            title={classCategory || undefined}
+                            colSpan={COLUMN_COUNT}
+                            className="px-6 py-4"
                           >
-                            {classCategory || "-"}
-                          </TableCell>
-                          <TableCell
-                            className={`px-5 text-right tabular-nums ${
-                              availableIsZero
-                                ? "font-semibold text-red-600"
-                                : "text-slate-900"
-                            }`}
-                          >
-                            {formatNumber(recommendation.quantityAvailable)}
-                          </TableCell>
-                          <TableCell className="px-5 text-right tabular-nums text-slate-900">
-                            {formatNumber(recommendation.quantityOnHand)}
-                          </TableCell>
-                          <TableCell className="px-5 text-right tabular-nums text-slate-900">
-                            {formatNumber(recommendation.quantityOnOrder)}
-                          </TableCell>
-                          <TableCell className="px-5 text-right tabular-nums text-slate-700">
-                            {recommendation.reorderLevel !== null
-                              ? formatNumber(recommendation.reorderLevel)
-                              : "-"}
-                          </TableCell>
-                          <TableCell className="px-5 text-right tabular-nums text-slate-700">
-                            {recommendation.maximumStockLevel !== null
-                              ? formatNumber(recommendation.maximumStockLevel)
-                              : "-"}
-                          </TableCell>
-                          <TableCell className="px-5">
-                            <Badge variant={getStatusBadgeVariant(recommendation.status)}>
-                              {getStatusLabel(recommendation.status)}
-                            </Badge>
+                            <div className="space-y-3">
+                              <p className="text-sm font-medium text-slate-900">
+                                Location breakdown
+                              </p>
+                              {locations.length === 0 ? (
+                                <p className="text-sm text-slate-500">
+                                  No per-location balances available for this
+                                  SKU.
+                                </p>
+                              ) : (
+                                <div className="overflow-x-auto rounded-2xl border border-transparent bg-white shadow-card">
+                                  <table className="min-w-full text-sm">
+                                    <thead className="bg-slate-50">
+                                      <tr>
+                                        <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+                                          Location
+                                        </th>
+                                        <th className="px-4 py-2 text-right text-xs font-medium uppercase tracking-wide text-slate-500">
+                                          On hand
+                                        </th>
+                                        <th className="px-4 py-2 text-right text-xs font-medium uppercase tracking-wide text-slate-500">
+                                          Available
+                                        </th>
+                                        <th className="px-4 py-2 text-right text-xs font-medium uppercase tracking-wide text-slate-500">
+                                          On order
+                                        </th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {locations.map((location, index) => (
+                                        <tr
+                                          key={`${recommendation.sku}-${location.locationCode ?? index}`}
+                                          className="border-t border-slate-100"
+                                        >
+                                          <td className="px-4 py-2 text-slate-700">
+                                            {location.locationName ??
+                                              location.locationCode ??
+                                              "Unknown location"}
+                                          </td>
+                                          <td className="px-4 py-2 text-right text-slate-700">
+                                            {formatNumber(
+                                              location.quantityOnHand
+                                            )}
+                                          </td>
+                                          <td className="px-4 py-2 text-right text-slate-700">
+                                            {formatNumber(
+                                              location.quantityAvailable
+                                            )}
+                                          </td>
+                                          <td className="px-4 py-2 text-right text-slate-700">
+                                            {formatNumber(
+                                              location.quantityOnOrder
+                                            )}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+                            </div>
                           </TableCell>
                         </TableRow>
-                        {isExpanded ? (
-                          <TableRow
-                            key={`${recommendation.sku}-details`}
-                            className="bg-slate-50 hover:bg-slate-50"
-                          >
-                            <TableCell colSpan={9} className="px-6 py-4">
-                              <div className="space-y-3">
-                                <p className="text-sm font-medium text-slate-900">
-                                  Location breakdown
-                                </p>
-                                {locations.length === 0 ? (
-                                  <p className="text-sm text-slate-500">
-                                    No per-location balances available for this SKU.
-                                  </p>
-                                ) : (
-                                  <div className="overflow-x-auto rounded-2xl border border-transparent shadow-card bg-white">
-                                    <table className="min-w-full text-sm">
-                                      <thead className="bg-slate-50">
-                                        <tr>
-                                          <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
-                                            Location
-                                          </th>
-                                          <th className="px-4 py-2 text-right text-xs font-medium uppercase tracking-wide text-slate-500">
-                                            On hand
-                                          </th>
-                                          <th className="px-4 py-2 text-right text-xs font-medium uppercase tracking-wide text-slate-500">
-                                            Available
-                                          </th>
-                                          <th className="px-4 py-2 text-right text-xs font-medium uppercase tracking-wide text-slate-500">
-                                            On order
-                                          </th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {locations.map((location, index) => (
-                                          <tr
-                                            key={`${recommendation.sku}-${location.locationCode ?? index}`}
-                                            className="border-t border-slate-100"
-                                          >
-                                            <td className="px-4 py-2 text-slate-700">
-                                              {location.locationName ??
-                                                location.locationCode ??
-                                                "Unknown location"}
-                                            </td>
-                                            <td className="px-4 py-2 text-right text-slate-700">
-                                              {formatNumber(location.quantityOnHand)}
-                                            </td>
-                                            <td className="px-4 py-2 text-right text-slate-700">
-                                              {formatNumber(location.quantityAvailable)}
-                                            </td>
-                                            <td className="px-4 py-2 text-right text-slate-700">
-                                              {formatNumber(location.quantityOnOrder)}
-                                            </td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                )}
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ) : null}
-                      </Fragment>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
+              </TableBody>
+            </Table>
 
             <div className="flex flex-col gap-3 border-t border-slate-100 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-wrap items-center gap-3">
                 <p className="text-sm text-slate-600">
-                  Page {formatNumber(page)} of {formatNumber(totalPages)}
+                  Page {formatNumber(safePage)} of {formatNumber(totalPages)}
                 </p>
                 <div className="flex gap-2">
-                {isFirstPage ? (
-                  <span className="rounded-2xl border border-transparent bg-white px-3 py-1.5 text-sm font-medium text-slate-400 shadow-card">
-                    Previous
-                  </span>
-                ) : (
-                  <Link
-                    href={inventoryPageHref(page - 1, showInactive)}
-                    className="rounded-2xl border border-transparent bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-card hover:bg-slate-50"
-                  >
-                    Previous
-                  </Link>
-                )}
-                {isLastPage ? (
-                  <span className="rounded-2xl border border-transparent bg-white px-3 py-1.5 text-sm font-medium text-slate-400 shadow-card">
-                    Next
-                  </span>
-                ) : (
-                  <Link
-                    href={inventoryPageHref(page + 1, showInactive)}
-                    className="rounded-2xl border border-transparent bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-card hover:bg-slate-50"
-                  >
-                    Next
-                  </Link>
-                )}
+                  {isFirstPage ? (
+                    <span className="rounded-2xl border border-transparent bg-white px-3 py-1.5 text-sm font-medium text-slate-400 shadow-card">
+                      Previous
+                    </span>
+                  ) : (
+                    <Link
+                      href={inventoryPageHref(safePage - 1, showInactive)}
+                      className="rounded-2xl border border-transparent bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-card hover:bg-slate-50"
+                    >
+                      Previous
+                    </Link>
+                  )}
+                  {isLastPage ? (
+                    <span className="rounded-2xl border border-transparent bg-white px-3 py-1.5 text-sm font-medium text-slate-400 shadow-card">
+                      Next
+                    </span>
+                  ) : (
+                    <Link
+                      href={inventoryPageHref(safePage + 1, showInactive)}
+                      className="rounded-2xl border border-transparent bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-card hover:bg-slate-50"
+                    >
+                      Next
+                    </Link>
+                  )}
                 </div>
               </div>
             </div>

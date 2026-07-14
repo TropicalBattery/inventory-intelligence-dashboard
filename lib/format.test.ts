@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatCurrencyJMD,
+  formatCurrencyUSD,
   formatSuggestedQty,
   formatSyncRunDuration,
 } from "@/lib/format";
@@ -14,6 +15,18 @@ describe("formatCurrencyJMD", () => {
     expect(formatCurrencyJMD(null)).toBe("-");
     expect(formatCurrencyJMD(undefined)).toBe("-");
     expect(formatCurrencyJMD(Number.NaN)).toBe("-");
+  });
+});
+
+describe("formatCurrencyUSD", () => {
+  it("returns a formatted USD value for valid numbers", () => {
+    expect(formatCurrencyUSD(1234.5)).toBe("US$1,234.50");
+  });
+
+  it('returns "-" for null, undefined, and NaN', () => {
+    expect(formatCurrencyUSD(null)).toBe("-");
+    expect(formatCurrencyUSD(undefined)).toBe("-");
+    expect(formatCurrencyUSD(Number.NaN)).toBe("-");
   });
 });
 

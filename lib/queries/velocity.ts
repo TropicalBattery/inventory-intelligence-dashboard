@@ -1,6 +1,8 @@
 import { computeSalesVelocityRows } from "@/lib/queries/compute-sales-velocity";
 import { fetchReorderInputRowBySku } from "@/lib/queries/reorder-inputs";
+import { getSupplierNameMap } from "@/lib/queries/suppliers";
 import { createClient } from "@/lib/supabase/server";
+import { fetchAllPages } from "@/lib/supabase/paginate";
 import { buildVelocityDiagnostic } from "@/lib/velocity-engine";
 import { buildReorderRecommendation } from "@/lib/reorder-engine";
 import { TENANT_ID } from "@/lib/tenant";
@@ -11,29 +13,44 @@ import type {
   VwSalesVelocityRow,
 } from "@/lib/types";
 
+function normalizeSku(sku: string): string {
+  return sku.trim();
+}
+
 async function fetchSalesVelocityFromView(): Promise<
   VwSalesVelocityRow[] | null
 > {
   const supabase = await createClient();
 
-  const { data, error } = await supabase
-    .from("vw_sales_velocity")
-    .select("*")
-    .eq("tenant_id", TENANT_ID);
+  try {
+    const rows = await fetchAllPages<VwSalesVelocityRow>(async (from, to) => {
+      const { data, error } = await supabase
+        .from("vw_sales_velocity")
+        .select("*")
+        .eq("tenant_id", TENANT_ID)
+        .order("sku", { ascending: true })
+        .range(from, to);
 
-  if (error) {
+      return {
+        data: data as VwSalesVelocityRow[] | null,
+        error,
+      };
+    });
+
+    return rows;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
     if (
-      error.message.includes("vw_sales_velocity") ||
-      error.message.includes("schema cache")
+      message.includes("vw_sales_velocity") ||
+      message.includes("schema cache")
     ) {
       return null;
     }
 
-    console.error("Failed to fetch velocity rows:", error.message);
+    console.error("Failed to fetch velocity rows:", message);
     return [];
   }
-
-  return (data ?? []) as VwSalesVelocityRow[];
 }
 
 async function fetchSalesVelocityComputed(): Promise<VwSalesVelocityRow[]> {
@@ -82,7 +99,11 @@ export const getVelocityRowsBySku = cache(
     const map = new Map<string, VwSalesVelocityRow>();
 
     for (const row of rows) {
-      map.set(row.sku, row);
+      if (!row.sku) {
+        continue;
+      }
+
+      map.set(normalizeSku(row.sku), row);
     }
 
     return map;
@@ -92,8 +113,37 @@ export const getVelocityRowsBySku = cache(
 export async function getVelocityRowForSku(
   sku: string
 ): Promise<VwSalesVelocityRow | null> {
+  const normalized = normalizeSku(sku);
   const velocityBySku = await getVelocityRowsBySku();
-  return velocityBySku.get(sku) ?? null;
+  const cached = velocityBySku.get(normalized);
+
+  if (cached) {
+    return cached;
+  }
+
+  // Direct lookup when the SKU was outside the first PostgREST page
+  // before pagination landed, or if the map is empty/partial.
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("vw_sales_velocity")
+    .select("*")
+    .eq("tenant_id", TENANT_ID)
+    .eq("sku", normalized)
+    .maybeSingle();
+
+  if (error) {
+    if (
+      error.message.includes("vw_sales_velocity") ||
+      error.message.includes("schema cache")
+    ) {
+      return null;
+    }
+
+    console.error("Failed to fetch velocity row for SKU:", error.message);
+    return null;
+  }
+
+  return (data as VwSalesVelocityRow | null) ?? null;
 }
 
 export function buildVelocityDiagnosticMap(
@@ -103,7 +153,7 @@ export function buildVelocityDiagnosticMap(
   const diagnostics = new Map<string, VelocityDiagnostic>();
 
   for (const rec of recommendations) {
-    const velocityRow = velocityBySku.get(rec.sku);
+    const velocityRow = velocityBySku.get(normalizeSku(rec.sku));
 
     if (!velocityRow) {
       continue;
@@ -124,7 +174,14 @@ export async function getReorderRecommendationForSku(
     return null;
   }
 
-  return buildReorderRecommendation(row);
+  const nameMap = await getSupplierNameMap();
+  const recommendation = buildReorderRecommendation(row);
+  return {
+    ...recommendation,
+    supplierName: recommendation.supplierExternalId
+      ? (nameMap.get(recommendation.supplierExternalId) ?? null)
+      : null,
+  };
 }
 
 export async function getVelocityDiagnosticForSku(

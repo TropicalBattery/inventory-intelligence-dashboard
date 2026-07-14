@@ -2,9 +2,14 @@ import {
   isNonStockClass,
   isReorderableClass,
 } from "@/lib/item-class-config";
+import { selectOverstockRecommendations } from "@/lib/reorder/overstock";
 import type { ReorderRecommendation } from "@/lib/types";
 
-export type ReorderPageTab = "reorder" | "nonstock" | "unclassified";
+export type ReorderPageTab =
+  | "reorder"
+  | "overstock"
+  | "nonstock"
+  | "unclassified";
 
 export type ClassifiedReorderRecommendations = {
   reorderAction: ReorderRecommendation[];
@@ -15,6 +20,7 @@ export type ClassifiedReorderRecommendations = {
 export type ReorderTabCounts = {
   reorderActionTotal: number;
   reorderActionNeedAttention: number;
+  overstockTotal: number;
   nonStockTotal: number;
   unclassifiedTotal: number;
 };
@@ -63,14 +69,22 @@ export function countReorderTabAttention(
   ).length;
 }
 
+/** Soft filter: Action / Overstock show whitelisted SKUs only. */
+export function selectWhitelistedReorderAction(
+  recommendations: ReorderRecommendation[]
+): ReorderRecommendation[] {
+  return recommendations.filter((rec) => rec.isWhitelisted);
+}
+
 export function buildReorderTabCounts(
   classified: ClassifiedReorderRecommendations
 ): ReorderTabCounts {
+  const reorderAction = selectWhitelistedReorderAction(classified.reorderAction);
+
   return {
-    reorderActionTotal: classified.reorderAction.length,
-    reorderActionNeedAttention: countReorderTabAttention(
-      classified.reorderAction
-    ),
+    reorderActionTotal: reorderAction.length,
+    reorderActionNeedAttention: countReorderTabAttention(reorderAction),
+    overstockTotal: selectOverstockRecommendations(reorderAction).length,
     nonStockTotal: classified.nonStock.length,
     unclassifiedTotal: classified.unclassified.length,
   };
@@ -79,7 +93,12 @@ export function buildReorderTabCounts(
 export function parseReorderPageTab(
   value: string | null | undefined
 ): ReorderPageTab {
-  if (value === "nonstock" || value === "unclassified" || value === "reorder") {
+  if (
+    value === "nonstock" ||
+    value === "unclassified" ||
+    value === "reorder" ||
+    value === "overstock"
+  ) {
     return value;
   }
 

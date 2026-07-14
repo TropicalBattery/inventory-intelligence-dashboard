@@ -4,28 +4,34 @@ import { useCallback, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ReorderActionTab } from "@/components/reorder/reorder-action-tab";
 import { ReorderNonStockTab } from "@/components/reorder/reorder-non-stock-tab";
+import { ReorderOverstockTab } from "@/components/reorder/reorder-overstock-tab";
 import { ReorderTabBar } from "@/components/reorder/reorder-tab-bar";
 import { ReorderUnclassifiedTab } from "@/components/reorder/reorder-unclassified-tab";
 import { EmptyReorderState } from "@/components/reorder/reorder-utils";
 import { Card } from "@/components/ui/Card";
-import {  buildReorderTabCounts,
+import {
+  buildReorderTabCounts,
   countReorderTabAttention,
   parseReorderPageTab,
+  selectWhitelistedReorderAction,
   type ClassifiedReorderRecommendations,
   type ReorderPageTab,
 } from "@/lib/reorder-tab-classification";
 import type {
-  ReorderRecommendation,
   VelocityDiagnostic,
   VwSalesVelocityRow,
 } from "@/lib/types";
 import type { ItemSeasonalityProfile } from "@/lib/seasonality/types";
+import type { SupplierFilterOption } from "@/lib/queries/suppliers";
 
 type ReorderRecommendationsProps = {
   classified: ClassifiedReorderRecommendations;
   diagnosticsBySku: Record<string, VelocityDiagnostic>;
   velocityBySku: Record<string, VwSalesVelocityRow>;
   seasonalityBySku: Record<string, ItemSeasonalityProfile>;
+  lastInventorySyncAt: string | null;
+  activeInventorySkuCount?: number | null;
+  supplierFilterOptions?: SupplierFilterOption[];
 };
 
 export function ReorderRecommendations({
@@ -33,13 +39,22 @@ export function ReorderRecommendations({
   diagnosticsBySku,
   velocityBySku,
   seasonalityBySku,
+  lastInventorySyncAt,
+  activeInventorySkuCount = null,
+  supplierFilterOptions = [],
 }: ReorderRecommendationsProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const activeTab = parseReorderPageTab(searchParams.get("tab"));
+
+  const whitelistedReorderAction = useMemo(
+    () => selectWhitelistedReorderAction(classified.reorderAction),
+    [classified.reorderAction]
+  );
+
   const [reorderAttentionCount, setReorderAttentionCount] = useState(() =>
-    countReorderTabAttention(classified.reorderAction)
+    countReorderTabAttention(whitelistedReorderAction)
   );
 
   const tabCounts = useMemo(
@@ -71,22 +86,31 @@ export function ReorderRecommendations({
 
   return (
     <div className="space-y-6 pb-8">
-      <Card className="overflow-hidden p-0">        <ReorderTabBar
+      <Card className="rounded-2xl p-0">
+        <ReorderTabBar
           activeTab={activeTab}
           reorderAttentionCount={reorderAttentionCount}
+          overstockCount={tabCounts.overstockTotal}
           nonStockCount={tabCounts.nonStockTotal}
           unclassifiedCount={tabCounts.unclassifiedTotal}
+          lastInventorySyncAt={lastInventorySyncAt}
           onTabChange={handleTabChange}
         />
 
         <div className="p-4 sm:p-6">
           {activeTab === "reorder" ? (
             <ReorderActionTab
-              recommendations={classified.reorderAction}
+              recommendations={whitelistedReorderAction}
               diagnosticsBySku={diagnosticsBySku}
               seasonalityBySku={seasonalityBySku}
               onAttentionCountChange={handleAttentionCountChange}
+              activeInventorySkuCount={activeInventorySkuCount}
+              supplierFilterOptions={supplierFilterOptions}
             />
+          ) : null}
+
+          {activeTab === "overstock" ? (
+            <ReorderOverstockTab recommendations={whitelistedReorderAction} />
           ) : null}
 
           {activeTab === "nonstock" ? (

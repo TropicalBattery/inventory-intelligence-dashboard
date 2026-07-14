@@ -2,9 +2,9 @@
 
 import { Info, Sparkles } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState, useTransition, type ReactNode } from "react";
-import { createDraftPoSelection } from "@/app/(main)/reorder/actions";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { ReorderItemExplanationResult } from "@/app/(main)/reorder/ai-actions";
+import { usePoCart } from "@/components/po-cart/po-cart-provider";
 import { SeasonalWarningBadge } from "@/components/reorder/seasonal-warning-badge";
 import { AiFormattedText } from "@/components/reorder/ai-formatted-text";
 import { formatCurrencyJMD, formatNumber } from "@/lib/format";
@@ -12,11 +12,27 @@ import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import type { PipelineBreakdown } from "@/lib/pipeline-breakdown";
 import { formatRoundingInfo } from "@/lib/reorder-engine";
 import {
+  computeDefaultReorderLevel,
+  resolveCoverBands,
+  type CoverBands,
+} from "@/lib/reorder/cover-thresholds";
+import { shouldShowDemandAdjustmentNote } from "@/lib/reorder/demand";
+import {
+  getAbcBadgeClassName,
+  getAbcClassDescription,
+} from "@/lib/reorder/abc";
+import {
   computeMonthsOfCoverAtOrderQty,
   formatMonthsOfCoverLabel,
   getMonthsOfCoverBadgeClasses,
   getMonthsOfCoverColorTier,
 } from "@/lib/reorder/months-of-cover";
+import {
+  getPurchaseBlockNote,
+  isPurchaseBlockedRule,
+  resolveCartSupplierForRule,
+} from "@/lib/reorder/purchase-rules-ui";
+import { resolveSupplierDisplayName } from "@/lib/queries/suppliers";
 import { getSeasonalReorderWarning } from "@/lib/seasonality/reorder-warnings";
 import type { ItemSeasonalityProfile } from "@/lib/seasonality/types";
 import type {
@@ -92,13 +108,16 @@ function isCoverDemandUnknown(rec: ReorderRecommendation): boolean {
 
 function getCoverPillClasses(
   months: number | null,
-  demandUnknown: boolean
+  demandUnknown: boolean,
+  bands: CoverBands = resolveCoverBands(null)
 ): string {
   if (demandUnknown) {
     return "border-[#E5E7EB] bg-[#F3F4F6] text-[#9CA3AF]";
   }
 
-  return getMonthsOfCoverBadgeClasses(getMonthsOfCoverColorTier(months));
+  return getMonthsOfCoverBadgeClasses(
+    getMonthsOfCoverColorTier(months, bands)
+  );
 }
 
 function getCoverPillLabel(
@@ -114,17 +133,20 @@ function getCoverPillLabel(
 
 function getCoverBadgeClasses(
   months: number | null,
-  demandUnknown: boolean
+  demandUnknown: boolean,
+  bands: CoverBands = resolveCoverBands(null)
 ): string {
   if (demandUnknown || months === null) {
     return "bg-[#F3F4F6] text-[#9CA3AF]";
   }
 
-  switch (getMonthsOfCoverColorTier(months)) {
+  switch (getMonthsOfCoverColorTier(months, bands)) {
     case "red":
       return "bg-[#FDF2F2] text-[#CC2B2B]";
     case "amber":
       return "bg-[#FFFBEB] text-[#B45309]";
+    case "orange":
+      return "bg-[#FFF7ED] text-[#C2410C]";
     case "green":
       return "bg-[#F0FDF4] text-[#16A34A]";
     default:
@@ -160,13 +182,13 @@ function getStatusBadge(rec: ReorderRecommendation): {
       return {
         label: "Watch",
         className:
-          "rounded-full border border-[#B8D9F0] bg-[#E6F1FB] px-3 py-1 text-xs font-semibold text-[#185FA5]",
+          "rounded-full border border-[#FDE68A] bg-[#FFFBEB] px-3 py-1 text-xs font-semibold text-[#B45309]",
       };
     case "reorder_needed":
       return {
         label: "Reorder Needed",
         className:
-          "rounded-full border border-[#FDE68A] bg-[#FFFBEB] px-3 py-1 text-xs font-semibold text-[#B45309]",
+          "rounded-full border border-[#FDBA74] bg-[#FFF7ED] px-3 py-1 text-xs font-semibold text-[#C2410C]",
       };
     case "ok":
       return {
@@ -202,14 +224,19 @@ function InventoryDetailItem({
   label,
   iconClass,
   value,
+  title,
 }: {
   label: string;
   iconClass: string;
   value: ReactNode;
+  title?: string;
 }) {
   return (
     <div className="space-y-1">
-      <dt className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-[#9CA3AF]">
+      <dt
+        className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-[#9CA3AF]"
+        title={title}
+      >
         <i className={`ti ${iconClass} text-xs`} aria-hidden="true" />
         {label}
       </dt>
@@ -242,6 +269,31 @@ function formatInventoryNullableNumber(value: number | null): ReactNode {
   return formatInventoryNumber(value);
 }
 
+function formatReorderLevelDisplay(rec: ReorderRecommendation): ReactNode {
+  if (rec.reorderLevel !== null) {
+    return formatInventoryNullableNumber(rec.reorderLevel);
+  }
+
+  if (
+    rec.avgDailyDemandUnits !== null &&
+    rec.avgDailyDemandUnits !== undefined &&
+    rec.avgDailyDemandUnits > 0
+  ) {
+    const effective = Math.round(
+      computeDefaultReorderLevel(rec.avgDailyDemandUnits) * 100
+    ) / 100;
+
+    return (
+      <span className="text-sm font-semibold text-[#111111]">
+        {formatNumber(effective)}{" "}
+        <span className="text-xs font-medium text-[#9CA3AF]">(default)</span>
+      </span>
+    );
+  }
+
+  return formatInventoryNullableNumber(null);
+}
+
 function formatInventoryTextValue(value: string): ReactNode {
   if (value === "-") {
     return <span className="text-sm text-[#9CA3AF]">-</span>;
@@ -249,6 +301,25 @@ function formatInventoryTextValue(value: string): ReactNode {
 
   return (
     <span className="text-sm font-semibold text-[#111111]">{value}</span>
+  );
+}
+
+function formatTurnoverDisplay(turnoverRatio: number | null): ReactNode {
+  if (turnoverRatio === null || !Number.isFinite(turnoverRatio)) {
+    return <span className="text-sm text-[#9CA3AF]">-</span>;
+  }
+
+  const colorClass =
+    turnoverRatio >= 6
+      ? "text-[#16A34A]"
+      : turnoverRatio >= 2
+        ? "text-[#111111]"
+        : "text-[#B45309]";
+
+  return (
+    <span className={`text-sm font-semibold tabular-nums ${colorClass}`}>
+      {turnoverRatio.toFixed(1)}x / yr
+    </span>
   );
 }
 
@@ -512,7 +583,7 @@ function InventoryDetailsSection({
         <InventoryDetailItem
           label="Reorder Level"
           iconClass="ti-calendar"
-          value={formatInventoryNullableNumber(rec.reorderLevel)}
+          value={formatReorderLevelDisplay(rec)}
         />
         {showMaxStockLevel ? (
           <InventoryDetailItem
@@ -530,6 +601,50 @@ function InventoryDetailsSection({
               category={rec.category}
             />
           }
+        />
+        {rec.abcClass ? (
+          <InventoryDetailItem
+            label="ABC Class"
+            iconClass="ti-chart-bar"
+            value={
+              <span className="inline-flex flex-wrap items-center gap-2">
+                <span className={getAbcBadgeClassName(rec.abcClass)}>
+                  {rec.abcClass}
+                </span>
+                <span className="text-xs text-[#9CA3AF]">
+                  {getAbcClassDescription(rec.abcClass)}
+                </span>
+              </span>
+            }
+          />
+        ) : null}
+        <InventoryDetailItem
+          label="Seasonality"
+          iconClass="ti-calendar-stats"
+          title="Observed peak months from monthly sales (single-cycle evidence)"
+          value={
+            rec.seasonality?.isSeasonal && rec.seasonality.peakLabel ? (
+              <span className="text-[#6D28D9]">
+                {rec.seasonality.peakLabel}
+                {rec.seasonality.strength != null
+                  ? ` · ${rec.seasonality.strength}x avg`
+                  : ""}
+              </span>
+            ) : (
+              <span className="text-[#9CA3AF]">-</span>
+            )
+          }
+        />
+        <InventoryDetailItem
+          label="Buyer Rank"
+          iconClass="ti-list-numbers"
+          title="The buyer's own priority ranking from the Order Tool (1 = highest)"
+          value={formatInventoryNullableNumber(rec.buyerRank)}
+        />
+        <InventoryDetailItem
+          label="Turnover"
+          iconClass="ti-refresh"
+          value={formatTurnoverDisplay(rec.turnoverRatio)}
         />
         {showRounding ? (
           <InventoryDetailItem
@@ -551,6 +666,15 @@ function InventoryDetailsSection({
           />
         ) : null}
       </dl>
+      {shouldShowDemandAdjustmentNote(rec) ? (
+        <p className="mt-3 flex items-start gap-1.5 text-xs text-[#9CA3AF]">
+          <i className="ti ti-info-circle mt-0.5 shrink-0 text-xs" aria-hidden="true" />
+          <span>
+            Demand adjusted: excludes {rec.stockoutMonthsExcluded} months with
+            no sales
+          </span>
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -585,25 +709,68 @@ export function ReorderExpandedPanel({
   const [suppliers, setSuppliers] = useState<SupplierReference[]>([]);
   const [suppliersLoading, setSuppliersLoading] = useState(true);
   const [addToPoError, setAddToPoError] = useState<string | null>(null);
-  const [isAddingToPo, startAddToPoTransition] = useTransition();
+  const [isAddingToPo, setIsAddingToPo] = useState(false);
+  const [justAdded, setJustAdded] = useState(false);
+  const { addItem, cartSkus } = usePoCart();
+  const skuInCart = cartSkus.has(rec.sku);
 
   useEffect(() => {
     setOrderQtyInput(String(rec.suggestedQtyRounded));
-    setSelectedSupplierExternalId(rec.supplierExternalId);
+    const lockedVendorId =
+      rec.purchaseRule?.ruleType === "vendor_lock"
+        ? rec.purchaseRule.lockedVendorId
+        : null;
+    setSelectedSupplierExternalId(
+      lockedVendorId ?? rec.supplierExternalId
+    );
     setSelectedSupplierPrice(rec.supplierUnitPrice);
     setAddToPoError(null);
-  }, [rec.sku, rec.suggestedQtyRounded, rec.supplierExternalId, rec.supplierUnitPrice]);
+    setJustAdded(false);
+  }, [
+    rec.sku,
+    rec.suggestedQtyRounded,
+    rec.supplierExternalId,
+    rec.supplierUnitPrice,
+    rec.purchaseRule,
+  ]);
+
+  useEffect(() => {
+    if (!justAdded) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setJustAdded(false);
+    }, 1500);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [justAdded]);
 
   useEffect(() => {
     setSuppliersLoading(true);
     fetch(`/api/suppliers-by-sku?sku=${encodeURIComponent(rec.sku)}`)
       .then((response) => response.json())
       .then((data: { suppliers?: SupplierReference[] }) => {
-        setSuppliers(data.suppliers ?? []);
+        const next = data.suppliers ?? [];
+        setSuppliers(next);
+
+        const lockedVendorId =
+          rec.purchaseRule?.ruleType === "vendor_lock"
+            ? rec.purchaseRule.lockedVendorId
+            : null;
+        if (lockedVendorId) {
+          const locked = next.find(
+            (supplier) => supplier.supplierExternalId === lockedVendorId
+          );
+          setSelectedSupplierExternalId(lockedVendorId);
+          if (locked) {
+            setSelectedSupplierPrice(locked.unitPrice);
+          }
+        }
       })
       .catch(() => setSuppliers([]))
       .finally(() => setSuppliersLoading(false));
-  }, [rec.sku]);
+  }, [rec.sku, rec.purchaseRule]);
 
   const debouncedMonthsOfCover = useMemo(
     () => computeMonthsOfCoverAtOrderQty(rec, debouncedOrderQty),
@@ -636,26 +803,73 @@ export function ReorderExpandedPanel({
   }, [rec.supplierUnitPrice, rec.suggestedQtyRounded]);
 
   function handleSelectSupplier(supplier: SupplierReference) {
+    if (
+      rec.purchaseRule?.ruleType === "vendor_lock" &&
+      rec.purchaseRule.lockedVendorId &&
+      supplier.supplierExternalId !== rec.purchaseRule.lockedVendorId
+    ) {
+      return;
+    }
     setSelectedSupplierExternalId(supplier.supplierExternalId);
     setSelectedSupplierPrice(supplier.unitPrice);
   }
 
-  function handleAddToPo() {
+  const priorityVendor =
+    suppliers.find((supplier) => supplier.isPriorityVendor) ?? null;
+  const simQty = parseOrderQtyInput(orderQtyInput);
+  const qtyToAdd = simQty > 0 ? simQty : rec.suggestedQtyRounded;
+  const purchaseBlocked = isPurchaseBlockedRule(rec.purchaseRule);
+  const purchaseBlockNote = getPurchaseBlockNote(rec.purchaseRule);
+  const lockedVendorId =
+    rec.purchaseRule?.ruleType === "vendor_lock"
+      ? rec.purchaseRule.lockedVendorId
+      : null;
+  const lockedVendorLabel =
+    suppliers.find((s) => s.supplierExternalId === lockedVendorId)
+      ?.supplierName ?? lockedVendorId;
+  const canAddToPo = qtyToAdd > 0 && !purchaseBlocked;
+
+  async function handleAddToPo() {
+    if (!canAddToPo || isAddingToPo) {
+      return;
+    }
+
     setAddToPoError(null);
+    setIsAddingToPo(true);
 
-    startAddToPoTransition(async () => {
-      const result = await createDraftPoSelection([
-        {
-          sku: rec.sku,
-          supplierExternalId: selectedSupplierExternalId,
-          suggestedQty: parseOrderQtyInput(orderQtyInput),
-        },
-      ]);
+    try {
+      const supplierExternalId = resolveCartSupplierForRule(
+        rec.purchaseRule,
+        selectedSupplierExternalId ??
+          priorityVendor?.supplierExternalId ??
+          null
+      );
+      const unitPrice =
+        (supplierExternalId
+          ? suppliers.find((s) => s.supplierExternalId === supplierExternalId)
+              ?.unitPrice
+          : null) ??
+        selectedSupplierPrice ??
+        (selectedSupplierExternalId
+          ? null
+          : (priorityVendor?.unitPrice ?? null));
 
-      if (!result.success) {
-        setAddToPoError(result.error ?? "Failed to add item to PO");
-      }
-    });
+      await addItem({
+        sku: rec.sku,
+        productName: rec.name,
+        quantity: qtyToAdd,
+        supplierExternalId,
+        unitPrice,
+        sourceStatus: rec.status,
+      });
+      setJustAdded(true);
+    } catch (error) {
+      setAddToPoError(
+        error instanceof Error ? error.message : "Failed to add item to PO"
+      );
+    } finally {
+      setIsAddingToPo(false);
+    }
   }
 
   return (
@@ -684,7 +898,8 @@ export function ReorderExpandedPanel({
             <span
               className={`rounded-full border px-3 py-1 text-xs font-medium ${getCoverPillClasses(
                 suggestedMonthsOfCover,
-                coverDemandUnknown
+                coverDemandUnknown,
+                rec.coverBands
               )}`}
             >
               {getCoverPillLabel(suggestedMonthsOfCover, coverDemandUnknown)}
@@ -709,7 +924,29 @@ export function ReorderExpandedPanel({
             >
               {suggestedArrivalLabel ?? "Lead time unknown"}
             </span>
+            {rec.seasonality?.isSeasonal && rec.seasonality.peakLabel ? (
+              <span
+                className="rounded-full border border-[#DDD6FE] bg-[#F5F3FF] px-3 py-1 text-xs font-medium text-[#6D28D9]"
+                title="Based on observed monthly sales; single-cycle evidence only"
+              >
+                Peak: {rec.seasonality.peakLabel}
+                {rec.seasonality.strength != null
+                  ? ` (${rec.seasonality.strength}x avg)`
+                  : ""}
+              </span>
+            ) : null}
           </div>
+          <p className="mt-2 text-xs text-[#9CA3AF]">
+            {rec.effectiveLeadTimeDays != null && rec.effectiveLeadTimeDays > 0
+              ? `Thresholds based on ${formatNumber(rec.effectiveLeadTimeDays)}-day lead time (${resolveSupplierDisplayName(
+                  rec.effectiveLeadTimeSupplierExternalId ===
+                    rec.supplierExternalId
+                    ? rec.supplierName
+                    : null,
+                  rec.effectiveLeadTimeSupplierExternalId
+                )})`
+              : "Standard thresholds (no lead time on file)"}
+          </p>
         </div>
 
         <div className="pl-8">
@@ -743,7 +980,8 @@ export function ReorderExpandedPanel({
               <span
                 className={`rounded-lg px-2.5 py-0.5 text-xs font-semibold ${getCoverBadgeClasses(
                   debouncedMonthsOfCover,
-                  coverDemandUnknown
+                  coverDemandUnknown,
+                  rec.coverBands
                 )}`}
               >
                 {coverDemandUnknown || debouncedMonthsOfCover === null
@@ -781,15 +1019,56 @@ export function ReorderExpandedPanel({
             </div>
           </div>
 
-          <div className="mt-4 flex justify-end">
-            <button
-              type="button"
-              disabled={isAddingToPo}
-              onClick={handleAddToPo}
-              className="rounded-xl bg-tbc-red px-4 py-2 text-sm font-medium text-white transition-colors duration-150 hover:bg-tbc-red-hover disabled:cursor-not-allowed disabled:opacity-60"
+          <div className="mt-4 flex flex-col items-end gap-2">
+            <span
+              className={
+                !canAddToPo
+                  ? "inline-flex cursor-not-allowed"
+                  : "inline-flex"
+              }
+              title={
+                purchaseBlocked
+                  ? purchaseBlockNote ?? undefined
+                  : !canAddToPo
+                    ? "Quantity must be greater than 0"
+                    : undefined
+              }
             >
-              {isAddingToPo ? "Adding..." : "Add to PO"}
-            </button>
+              <button
+                type="button"
+                disabled={!canAddToPo || isAddingToPo}
+                onClick={() => {
+                  void handleAddToPo();
+                }}
+                className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60 ${
+                  justAdded
+                    ? "bg-[#16A34A] text-white hover:bg-[#15803D]"
+                    : "bg-tbc-red text-white hover:bg-tbc-red-hover"
+                }`}
+              >
+                {justAdded ? (
+                  <>
+                    <i className="ti ti-check text-base" aria-hidden="true" />
+                    Added
+                  </>
+                ) : isAddingToPo ? (
+                  "Adding..."
+                ) : skuInCart ? (
+                  <>
+                    <i className="ti ti-plus text-base" aria-hidden="true" />
+                    In cart - update
+                  </>
+                ) : (
+                  <>
+                    <i className="ti ti-plus text-base" aria-hidden="true" />
+                    Add to PO
+                  </>
+                )}
+              </button>
+            </span>
+            {purchaseBlockNote ? (
+              <p className="text-xs text-[#9CA3AF]">{purchaseBlockNote}</p>
+            ) : null}
           </div>
 
           {addToPoError ? (
@@ -838,6 +1117,11 @@ export function ReorderExpandedPanel({
                 {suppliers.map((supplier) => {
                   const isSelected =
                     selectedSupplierExternalId === supplier.supplierExternalId;
+                  const isLockedVendor =
+                    Boolean(lockedVendorId) &&
+                    supplier.supplierExternalId === lockedVendorId;
+                  const selectDisabled =
+                    Boolean(lockedVendorId) && !isLockedVendor;
 
                   return (
                     <div
@@ -848,12 +1132,22 @@ export function ReorderExpandedPanel({
                       ].join(" ")}
                     >
                       <div>
-                        <p className="font-medium text-[#111111]">
-                          {supplier.supplierName ?? supplier.supplierExternalId}
-                        </p>
-                        <p className="mt-0.5 font-mono text-xs text-[#9CA3AF]">
-                          {supplier.supplierExternalId}
-                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p
+                            className="font-medium text-[#111111]"
+                            title={supplier.supplierExternalId}
+                          >
+                            {resolveSupplierDisplayName(
+                              supplier.supplierName,
+                              supplier.supplierExternalId
+                            )}
+                          </p>
+                          {isLockedVendor ? (
+                            <span className="inline-flex rounded-full border border-[#BFDBFE] bg-[#EFF6FF] px-2.5 py-0.5 text-xs font-medium text-[#1D4ED8]">
+                              Required vendor
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
                       <div className="text-right text-[#111111]">
                         {isValidNumber(supplier.leadTimeDays) ? (
@@ -900,8 +1194,14 @@ export function ReorderExpandedPanel({
                         ) : (
                           <button
                             type="button"
+                            disabled={selectDisabled}
+                            title={
+                              selectDisabled
+                                ? `Locked to ${lockedVendorLabel ?? "vendor"} per buyer rules`
+                                : undefined
+                            }
                             onClick={() => handleSelectSupplier(supplier)}
-                            className="cursor-pointer rounded-full border border-[#E5E7EB] px-3 py-1 text-xs text-[#6B7280] transition-colors duration-150 hover:border-[#CC2B2B] hover:text-[#CC2B2B]"
+                            className="cursor-pointer rounded-full border border-[#E5E7EB] px-3 py-1 text-xs text-[#6B7280] transition-colors duration-150 hover:border-[#CC2B2B] hover:text-[#CC2B2B] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-[#E5E7EB] disabled:hover:text-[#6B7280]"
                           >
                             Select
                           </button>

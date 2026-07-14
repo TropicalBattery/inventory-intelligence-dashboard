@@ -1,5 +1,6 @@
 "use client";
 
+import { PoCartButton } from "@/components/po-cart/po-cart-button";
 import { getPageSubtitle, getPageTitle } from "@/lib/navigation";
 import { usePathname } from "next/navigation";
 
@@ -22,7 +23,7 @@ export function TopBar({ userEmail }: TopBarProps) {
   const subtitle = getPageSubtitle(pathname);
 
   return (
-    <header className="sticky top-0 z-20 border-b border-[#E5E7EB] bg-white px-8 py-4">
+    <header className="sticky top-0 z-40 border-b border-[#E5E7EB] bg-white px-8 py-4">
       <div className="flex min-h-8 items-center justify-between gap-6">
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-xl font-semibold tracking-tight text-[#111111]">
@@ -33,6 +34,7 @@ export function TopBar({ userEmail }: TopBarProps) {
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-3">
+          <PoCartButton />
           <button
             type="button"
             className="flex h-9 w-9 items-center justify-center rounded-full text-[#6B7280] transition-colors duration-150 hover:bg-[#F3F4F6] hover:text-[#111111]"

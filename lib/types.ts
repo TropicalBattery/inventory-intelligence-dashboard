@@ -1,3 +1,11 @@
+import type { AbcClass } from "@/lib/reorder/abc";
+import type {
+  CoverBands,
+  LeadTimeSource,
+} from "@/lib/reorder/cover-thresholds";
+
+export type { AbcClass, CoverBands, LeadTimeSource };
+
 export type SupplierReliabilityRating =
   | "Preferred"
   | "Approved"
@@ -108,6 +116,29 @@ export type ReorderStatus =
 
 export type RoundingUnit = "container" | "pallet" | "unit";
 
+export type ItemPurchaseRuleType =
+  | "discontinue"
+  | "do_not_buy"
+  | "vendor_lock";
+
+export type ItemPurchaseRule = {
+  ruleType: ItemPurchaseRuleType;
+  lockedVendorId: string | null;
+};
+
+/**
+ * v1 SKU seasonality from monthly sales (see lib/reorder/seasonality.ts).
+ * Peak flags are single-cycle evidence until multi-year history accumulates.
+ */
+export type SeasonalityResult = {
+  isSeasonal: boolean;
+  peakMonths: number[];
+  peakLabel: string | null;
+  strength: number | null;
+  /** Complete months used after excluding the current incomplete month. */
+  historyMonths: number;
+};
+
 export type VwReorderInputsRow = {
   tenant_id: string;
   sku: string;
@@ -127,15 +158,35 @@ export type VwReorderInputsRow = {
   maximum_stock_level: number | null;
   annual_demand_units: number | null;
   avg_daily_demand_units: number | null;
+  /** Pre-adjustment avg daily from item_costing when demand was overridden. */
+  raw_avg_daily_demand_units: number | null;
+  /** Months in DEMAND_WINDOW_MONTHS with no sales when demand was adjusted. */
+  stockout_months_excluded: number | null;
   ordering_cost_per_order: number | null;
   holding_cost_per_unit_year: number | null;
   current_cost_local: number | null;
   best_supplier_external_id: string | null;
   best_unit_price: number | null;
   lead_time_days: number | null;
+  /**
+   * Lead time used for cover banding (locked → priority → min).
+   * Null when no positive lead time on file → standard bands.
+   */
+  effective_lead_time_days: number | null;
+  lead_time_source: LeadTimeSource;
+  /** Supplier that supplied effective_lead_time_days. */
+  effective_lead_time_supplier_external_id: string | null;
   safety_stock_months: number | null;
   pallet_qty: number | null;
   container_qty: number | null;
+  /** Soft workflow flag from active_inventory_whitelist (empty table → true). */
+  is_whitelisted: boolean;
+  /** Buyer priority from Order Tool (1 = highest). Null when unknown / fallback. */
+  buyer_rank: number | null;
+  /** Buyer purchase constraint from item_purchase_rules, if any. */
+  purchase_rule: ItemPurchaseRule | null;
+  /** Auto-detected from vw_monthly_sales_by_sku; null when no monthly history. */
+  seasonality: SeasonalityResult | null;
 };
 
 export type ReorderRecommendation = {
@@ -145,6 +196,12 @@ export type ReorderRecommendation = {
   itemClass: string | null;
   category: string | null;
   isActive: boolean | null;
+  /** Soft workflow flag from active_inventory_whitelist (empty table → true). */
+  isWhitelisted: boolean;
+  /** Buyer priority from Order Tool (1 = highest). Null when unknown / fallback. */
+  buyerRank: number | null;
+  /** Buyer purchase constraint from item_purchase_rules, if any. */
+  purchaseRule?: ItemPurchaseRule | null;
   quantityOnHand: number;
   quantityAvailable: number;
   quantityAllocated: number;
@@ -161,10 +218,30 @@ export type ReorderRecommendation = {
   maximumStockLevel: number | null;
   annualDemandUnits: number | null;
   avgDailyDemandUnits: number | null;
+  /** Pre-adjustment avg daily from item_costing when demand was overridden. */
+  rawAvgDailyDemandUnits: number | null;
+  /** Months in DEMAND_WINDOW_MONTHS with no sales when demand was adjusted. */
+  stockoutMonthsExcluded: number | null;
+  /**
+   * Pareto class by annual sales value across the recommendation set.
+   * A ≈ top cumulative 80%, B ≈ next to 95%, C = remainder. null if unknown.
+   */
+  abcClass: AbcClass;
+  /**
+   * Approximate inventory turns per year:
+   * annualDemandUnits / quantityOnHand (null when either side is missing/zero).
+   */
+  turnoverRatio: number | null;
   unitCost: number | null;
   supplierExternalId: string | null;
   vendorItemNumber: string | null;
   leadTimeDays: number | null;
+  /** Effective lead time for cover banding (may differ from quote used for ROP). */
+  effectiveLeadTimeDays: number | null;
+  leadTimeSource: LeadTimeSource;
+  effectiveLeadTimeSupplierExternalId: string | null;
+  /** Per-item months-of-cover band thresholds (lead-time-relative or standard). */
+  coverBands: CoverBands;
   palletQty: number | null;
   containerQty: number | null;
   orderingCostPerOrder: number | null;
@@ -182,6 +259,8 @@ export type ReorderRecommendation = {
   palletCount: number | null;
   status: ReorderStatus;
   dataGaps: string[];
+  /** Auto-detected from monthly sales history; null when no history fetched. */
+  seasonality: SeasonalityResult | null;
 };
 
 export type SupplierReference = {
@@ -332,6 +411,33 @@ export type PurchaseOrderActionResult = {
   success: boolean;
   error?: string;
   purchaseOrderId?: string;
+};
+
+export type PoCartItem = {
+  id: string;
+  tenantId: string;
+  createdBy: string;
+  sku: string;
+  productName: string | null;
+  quantity: number;
+  supplierExternalId: string | null;
+  unitPrice: number | null;
+  currency: string | null;
+  sourceStatus: string | null;
+  addedAt: string;
+  updatedAt: string;
+};
+
+export type PoCartGroup = {
+  supplierExternalId: string | null;
+  supplierName: string | null;
+  items: PoCartItem[];
+  subtotalUsd: number | null;
+};
+
+export type PoCartResponse = {
+  groups: PoCartGroup[];
+  totalItems: number;
 };
 
 export type VelocityTrend = "accelerating" | "decelerating" | "stable" | "unknown";

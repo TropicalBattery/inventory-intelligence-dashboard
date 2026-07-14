@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getSupplierNameMap } from "@/lib/queries/suppliers";
 import { sortSupplierReferencesForComparison } from "@/lib/suppliers/sort-supplier-references";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { SupplierReference, SupplierReliabilityRating } from "@/lib/types";
@@ -41,7 +42,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const supabase = createAdminClient();
-    const [referenceResult, suppliersResult] = await Promise.all([
+    const [referenceResult, supplierNames] = await Promise.all([
       supabase
         .from("item_supplier_reference")
         .select(
@@ -49,20 +50,12 @@ export async function GET(request: NextRequest) {
         )
         .eq("tenant_id", tenantId)
         .eq("sku", sku),
-      supabase
-        .from("suppliers")
-        .select("external_id, name")
-        .eq("tenant_id", tenantId),
+      getSupplierNameMap(),
     ]);
 
     if (referenceResult.error) {
       console.error("Supplier fetch error:", referenceResult.error);
       return NextResponse.json({ suppliers: [] });
-    }
-
-    const supplierNames = new Map<string, string | null>();
-    for (const row of suppliersResult.data ?? []) {
-      supplierNames.set(row.external_id, row.name);
     }
 
     const suppliers: SupplierReference[] = (

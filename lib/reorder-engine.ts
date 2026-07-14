@@ -1,4 +1,17 @@
 import { parsePipelineBreakdown } from "@/lib/pipeline-breakdown";
+import { computeMonthsOfCoverForClassification } from "@/lib/reorder/months-of-cover";
+import {
+  COVER_CRITICAL_MONTHS,
+  COVER_OK_MONTHS,
+  COVER_WATCH_MONTHS,
+  DAYS_PER_MONTH,
+  DEFAULT_REORDER_MONTHS,
+  DIRTY_REORDER_LEVEL_SENTINEL,
+  computeDefaultReorderLevel,
+  resolveCoverBands,
+  sanitizeReorderLevel,
+  type CoverBands,
+} from "@/lib/reorder/cover-thresholds";
 import type {
   ClassifyReorderStatusInput,
   PackSizeInput,
@@ -12,12 +25,45 @@ import type {
 /** Excludes GP ORDRPNTQTY bulk-set anomalies (e.g. 5,274) until source data is fixed. */
 export const REORDER_LEVEL_SANITY_CAP = 1000;
 
+export {
+  COVER_CRITICAL_MONTHS,
+  COVER_OK_MONTHS,
+  COVER_WATCH_MONTHS,
+  DAYS_PER_MONTH,
+  DEFAULT_REORDER_MONTHS,
+  DIRTY_REORDER_LEVEL_SENTINEL,
+  computeDefaultReorderLevel,
+  resolveCoverBands,
+  sanitizeReorderLevel,
+};
+
 function isPositiveNumber(value: number | null | undefined): value is number {
   return value !== null && value !== undefined && value > 0;
 }
 
 function roundToTwoDecimals(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+/**
+ * Inventory turnover ≈ annualised units sold / average units held.
+ * Without historical stock snapshots, approximate average inventory with
+ * current on-hand (standard practical stand-in until FEAT-11 snapshots).
+ */
+export function computeTurnoverRatio(
+  annualDemandUnits: number | null | undefined,
+  quantityOnHand: number
+): number | null {
+  if (
+    annualDemandUnits === null ||
+    annualDemandUnits === undefined ||
+    !(annualDemandUnits > 0) ||
+    !(quantityOnHand > 0)
+  ) {
+    return null;
+  }
+
+  return roundToTwoDecimals(annualDemandUnits / quantityOnHand);
 }
 
 export function calculateEOQ(
@@ -42,9 +88,6 @@ export const FOREIGN_SUPPLIER_LEAD_TIME_THRESHOLD_DAYS = 60;
 
 /** Default months of demand held as safety stock for foreign suppliers. */
 export const DEFAULT_SAFETY_STOCK_MONTHS = 3;
-
-/** Average days per month for converting daily demand to monthly. */
-export const DAYS_PER_MONTH = 30.44;
 
 /**
  * Pilot safety stock:
@@ -113,15 +156,33 @@ export function hasMeaningfulSuggestedQtyBasis(
     isPositiveNumber(input.holdingCostPerUnitYear);
 
   const hasSaneReorderLevelWithDemand =
-    isPositiveNumber(input.reorderLevel) &&
-    input.reorderLevel < REORDER_LEVEL_SANITY_CAP &&
-    isPositiveNumber(input.avgDailyDemandUnits);
+    (isPositiveNumber(input.reorderLevel) &&
+      input.reorderLevel < REORDER_LEVEL_SANITY_CAP &&
+      isPositiveNumber(input.avgDailyDemandUnits)) ||
+    (sanitizeReorderLevel(input.reorderLevel) === null &&
+      isPositiveNumber(input.avgDailyDemandUnits));
 
   const hasLeadTimeCoverageInputs =
     isPositiveNumber(input.avgDailyDemandUnits) &&
     isPositiveNumber(input.leadTimeDays);
 
   return hasEoqInputs || hasSaneReorderLevelWithDemand || hasLeadTimeCoverageInputs;
+}
+
+function resolveEffectiveReorderLevel(input: SuggestedQtyInput): number | null {
+  const sanitized = sanitizeReorderLevel(input.reorderLevel);
+
+  if (sanitized !== null) {
+    return sanitized;
+  }
+
+  if (isPositiveNumber(input.avgDailyDemandUnits)) {
+    return roundToTwoDecimals(
+      computeDefaultReorderLevel(input.avgDailyDemandUnits)
+    );
+  }
+
+  return null;
 }
 
 function hasCalculableEoq(input: SuggestedQtyInput): boolean {
@@ -135,12 +196,24 @@ function hasCalculableEoq(input: SuggestedQtyInput): boolean {
   );
 }
 
-function hasSaneReorderLevelWithDemand(input: SuggestedQtyInput): boolean {
-  return (
-    isPositiveNumber(input.reorderLevel) &&
-    input.reorderLevel < REORDER_LEVEL_SANITY_CAP &&
-    isPositiveNumber(input.avgDailyDemandUnits)
-  );
+function hasSaneReorderLevelWithDemand(
+  input: SuggestedQtyInput,
+  effectiveReorderLevel: number | null = input.reorderLevel
+): boolean {
+  if (
+    !isPositiveNumber(effectiveReorderLevel) ||
+    !isPositiveNumber(input.avgDailyDemandUnits)
+  ) {
+    return false;
+  }
+
+  // Sanity cap applies to GP-sourced levels only, not demand-derived defaults.
+  const fromGp = sanitizeReorderLevel(input.reorderLevel) !== null;
+  if (fromGp && effectiveReorderLevel >= REORDER_LEVEL_SANITY_CAP) {
+    return false;
+  }
+
+  return true;
 }
 
 function hasLeadTimeCoverageInputs(input: SuggestedQtyInput): boolean {
@@ -150,7 +223,10 @@ function hasLeadTimeCoverageInputs(input: SuggestedQtyInput): boolean {
   );
 }
 
-function resolveSuggestedQtyTarget(input: SuggestedQtyInput): {
+function resolveSuggestedQtyTarget(
+  input: SuggestedQtyInput,
+  effectiveReorderLevel: number | null
+): {
   target: number | null;
   dataGaps: string[];
 } {
@@ -160,9 +236,16 @@ function resolveSuggestedQtyTarget(input: SuggestedQtyInput): {
     return { target: input.eoq!, dataGaps };
   }
 
-  if (hasSaneReorderLevelWithDemand(input)) {
-    dataGaps.push("Using reorder_level as suggested quantity (EOQ unavailable)");
-    return { target: input.reorderLevel!, dataGaps };
+  if (hasSaneReorderLevelWithDemand(input, effectiveReorderLevel)) {
+    const usedDefault =
+      sanitizeReorderLevel(input.reorderLevel) === null &&
+      effectiveReorderLevel !== null;
+    dataGaps.push(
+      usedDefault
+        ? `Using default reorder level (${DEFAULT_REORDER_MONTHS} months of demand; EOQ unavailable)`
+        : "Using reorder_level as suggested quantity (EOQ unavailable)"
+    );
+    return { target: effectiveReorderLevel!, dataGaps };
   }
 
   if (hasLeadTimeCoverageInputs(input)) {
@@ -177,19 +260,28 @@ function resolveSuggestedQtyTarget(input: SuggestedQtyInput): {
     };
   }
 
+  const hasDemand =
+    isPositiveNumber(input.annualDemandUnits) ||
+    isPositiveNumber(input.avgDailyDemandUnits);
+
   dataGaps.push(
-    "Insufficient demand, cost, or lead time inputs to calculate a suggested quantity"
+    hasDemand
+      ? "Demand known but missing cost and lead time inputs - suggested quantity not calculated"
+      : "No demand data - suggested quantity not calculated"
   );
   return { target: null, dataGaps };
 }
 
-function resolveReorderThreshold(input: SuggestedQtyInput): number | null {
+function resolveReorderThreshold(
+  input: SuggestedQtyInput,
+  effectiveReorderLevel: number | null
+): number | null {
   if (isPositiveNumber(input.rop)) {
     return input.rop;
   }
 
-  if (hasSaneReorderLevelWithDemand(input)) {
-    return input.reorderLevel!;
+  if (hasSaneReorderLevelWithDemand(input, effectiveReorderLevel)) {
+    return effectiveReorderLevel!;
   }
 
   return null;
@@ -198,7 +290,11 @@ function resolveReorderThreshold(input: SuggestedQtyInput): number | null {
 export function calculateSuggestedQty(
   input: SuggestedQtyInput
 ): { suggestedQty: number; dataGaps: string[] } {
-  const { target, dataGaps } = resolveSuggestedQtyTarget(input);
+  const effectiveReorderLevel = resolveEffectiveReorderLevel(input);
+  const { target, dataGaps } = resolveSuggestedQtyTarget(
+    input,
+    effectiveReorderLevel
+  );
 
   if (target === null || target <= 0) {
     return { suggestedQty: 0, dataGaps };
@@ -207,7 +303,10 @@ export function calculateSuggestedQty(
   const effectiveStock =
     input.quantityAvailable + input.quantityOnOrder + input.quantityInPipeline;
 
-  const reorderThreshold = resolveReorderThreshold(input);
+  const reorderThreshold = resolveReorderThreshold(
+    input,
+    effectiveReorderLevel
+  );
 
   if (reorderThreshold !== null && effectiveStock >= reorderThreshold) {
     return { suggestedQty: 0, dataGaps };
@@ -267,36 +366,54 @@ export function hasReorderActivitySignals(
 }
 
 export function classifyReorderStatus(
-  input: ClassifyReorderStatusInput
+  input: ClassifyReorderStatusInput & {
+    quantityAllocated?: number;
+    avgDailyDemandUnits?: number | null;
+    coverBands?: CoverBands;
+  }
 ): ReorderStatus {
   const quantityAvailable = input.quantityAvailable;
   const annualDemandUnits = input.annualDemandUnits;
   const hasDemand = isPositiveNumber(annualDemandUnits);
-  const reorderLevel = input.reorderLevel ?? 0;
-  const hasReorderLevel = isPositiveNumber(input.reorderLevel);
+  const bands = input.coverBands ?? resolveCoverBands(null);
 
-  if (quantityAvailable <= 0 && hasDemand) {
+  // No demand signal at all: not part of the active reorder workflow
+  if (!hasDemand) {
+    return "no_demand";
+  }
+
+  const quantityAllocated =
+    input.quantityAllocated ??
+    input.quantityOnHand - input.quantityAvailable;
+
+  const monthsOfCover = computeMonthsOfCoverForClassification({
+    quantityOnHand: input.quantityOnHand,
+    quantityAllocated,
+    quantityInPipeline: input.quantityInPipeline,
+    annualDemandUnits,
+    avgDailyDemandUnits: input.avgDailyDemandUnits ?? null,
+  });
+
+  // critical: out of stock OR under critical band
+  if (
+    quantityAvailable <= 0 ||
+    monthsOfCover === null ||
+    monthsOfCover < bands.criticalBelow
+  ) {
     return "critical";
   }
 
-  if (quantityAvailable <= 0 && !hasDemand && hasReorderLevel) {
+  // watch: critical band to watch band
+  if (monthsOfCover < bands.watchBelow) {
     return "watch";
   }
 
-  if (
-    quantityAvailable > 0 &&
-    hasReorderLevel &&
-    quantityAvailable < reorderLevel &&
-    hasDemand
-  ) {
+  // reorder_needed: watch band to ok band
+  if (monthsOfCover < bands.okBelow) {
     return "reorder_needed";
   }
 
-  if (quantityAvailable > 0 && hasDemand) {
-    return "ok";
-  }
-
-  return "no_demand";
+  return "ok";
 }
 
 function resolveLeadTimeDays(row: VwReorderInputsRow): {
@@ -398,6 +515,7 @@ export function buildReorderRecommendation(
   }
 
   const rop = calculateROP(row.avg_daily_demand_units, leadTimeDays);
+  const reorderLevel = sanitizeReorderLevel(row.reorder_level);
 
   const { suggestedQty: suggestedQtyRaw, dataGaps: suggestedQtyGaps } =
     calculateSuggestedQty({
@@ -405,7 +523,7 @@ export function buildReorderRecommendation(
       quantityOnOrder,
       quantityInPipeline: 0,
       rop,
-      reorderLevel: row.reorder_level,
+      reorderLevel,
       maximumStockLevel: row.maximum_stock_level,
       eoq,
       avgDailyDemandUnits: row.avg_daily_demand_units,
@@ -422,16 +540,22 @@ export function buildReorderRecommendation(
     containerQty: row.container_qty,
   });
 
+  const effectiveLeadTimeDays = row.effective_lead_time_days ?? null;
+  const coverBands = resolveCoverBands(effectiveLeadTimeDays);
+
   const status = classifyReorderStatus({
     quantityAvailable,
     quantityOnOrder,
     quantityInPipeline,
     quantityOnHand,
+    quantityAllocated,
     rop,
-    reorderLevel: row.reorder_level,
+    reorderLevel,
     suggestedQty: suggestedQtyRaw,
     annualDemandUnits: row.annual_demand_units,
+    avgDailyDemandUnits: row.avg_daily_demand_units,
     unitCost: row.current_cost_local,
+    coverBands,
   });
 
   return {
@@ -441,6 +565,9 @@ export function buildReorderRecommendation(
     itemClass: row.item_class,
     category: row.category,
     isActive: null,
+    isWhitelisted: row.is_whitelisted,
+    buyerRank: row.buyer_rank,
+    purchaseRule: row.purchase_rule,
     quantityOnHand,
     quantityAvailable,
     quantityAllocated,
@@ -448,14 +575,26 @@ export function buildReorderRecommendation(
     quantityOnOrder,
     quantityInPipeline,
     pipelineBreakdown,
-    reorderLevel: row.reorder_level,
+    reorderLevel,
     maximumStockLevel: row.maximum_stock_level,
     annualDemandUnits: row.annual_demand_units,
     avgDailyDemandUnits: row.avg_daily_demand_units,
+    rawAvgDailyDemandUnits: row.raw_avg_daily_demand_units ?? null,
+    stockoutMonthsExcluded: row.stockout_months_excluded ?? null,
+    abcClass: null,
+    turnoverRatio: computeTurnoverRatio(
+      row.annual_demand_units,
+      quantityOnHand
+    ),
     unitCost: row.current_cost_local,
     supplierExternalId: row.best_supplier_external_id,
     vendorItemNumber: null,
     leadTimeDays,
+    effectiveLeadTimeDays,
+    leadTimeSource: row.lead_time_source ?? null,
+    effectiveLeadTimeSupplierExternalId:
+      row.effective_lead_time_supplier_external_id ?? null,
+    coverBands,
     palletQty: row.pallet_qty,
     containerQty: row.container_qty,
     orderingCostPerOrder: row.ordering_cost_per_order,
@@ -473,6 +612,7 @@ export function buildReorderRecommendation(
     palletCount: packSize.palletCount ?? null,
     status,
     dataGaps,
+    seasonality: row.seasonality ?? null,
   };
 }
 
