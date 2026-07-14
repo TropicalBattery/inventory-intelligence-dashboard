@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePoCart } from "@/components/po-cart/po-cart-provider";
+import { Modal } from "@/components/ui/Modal";
 import { formatCurrencyUSD } from "@/lib/format";
 import type { PoCartGroup, PoCartItem } from "@/lib/types";
 
@@ -135,93 +136,142 @@ function CartGroupCard({ group }: { group: PoCartGroup }) {
 
 export function PoCartPanel() {
   const { groups, totalItems, isOpen, close, clearCart } = usePoCart();
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
 
-  function handleClearAll() {
-    if (
-      !window.confirm("Clear all items from your purchase order cart?")
-    ) {
+  async function handleConfirmClear() {
+    if (isClearing) {
       return;
     }
 
-    void clearCart().catch((err: unknown) => {
+    setIsClearing(true);
+    try {
+      await clearCart();
+      setShowClearConfirm(false);
+    } catch (err: unknown) {
       console.error(err);
-    });
+    } finally {
+      setIsClearing(false);
+    }
   }
 
   return (
-    // Layering: header sticky z-40 → overlays z-40 → panels z-50
-    // (panels above header so close controls stay clickable)
-    <aside
-      className={`fixed right-0 top-0 z-50 flex h-full w-[400px] flex-col border-l border-[#E5E7EB] bg-white transition-transform duration-300 ease-in-out ${
-        isOpen ? "translate-x-0" : "translate-x-full"
-      }`}
-      aria-hidden={!isOpen}
-    >
-      <header className="flex h-16 items-center justify-between border-b border-[#E5E7EB] px-5">
-        <div className="flex items-center gap-2">
-          <i
-            className="ti ti-shopping-cart text-lg text-[#111111]"
-            aria-hidden="true"
-          />
-          <span className="text-sm font-semibold text-[#111111]">PO Cart</span>
-          <span className="text-xs text-[#9CA3AF]">{totalItems} items</span>
-        </div>
-        <div className="flex items-center gap-1">
-          {totalItems > 0 ? (
-            <button
-              type="button"
-              onClick={handleClearAll}
-              className="rounded-lg px-2 py-1.5 text-xs font-medium text-[#6B7280] hover:bg-[#F3F4F6] hover:text-[#111111]"
-            >
-              Clear all
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={close}
-            className="rounded-lg p-2 text-[#9CA3AF] hover:bg-[#F3F4F6] hover:text-[#111111]"
-            aria-label="Close purchase order cart"
-          >
-            <i className="ti ti-x text-lg" aria-hidden="true" />
-          </button>
-        </div>
-      </header>
-
-      <div className="flex-1 overflow-y-auto pb-4">
-        {groups.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+    <>
+      {/* Layering: header sticky z-40 → overlays z-40 → panels z-50
+          (panels above header so close controls stay clickable) */}
+      <aside
+        className={`fixed right-0 top-0 z-50 flex h-full w-[400px] flex-col border-l border-[#E5E7EB] bg-white transition-transform duration-300 ease-in-out ${
+          isOpen ? "translate-x-0" : "translate-x-full"
+        }`}
+        aria-hidden={!isOpen}
+      >
+        <header className="flex h-16 items-center justify-between border-b border-[#E5E7EB] px-5">
+          <div className="flex items-center gap-2">
             <i
-              className="ti ti-shopping-cart-off text-[32px] text-[#9CA3AF]"
+              className="ti ti-shopping-cart text-lg text-[#111111]"
               aria-hidden="true"
             />
-            <p className="mt-3 text-sm font-medium text-[#111111]">
-              Cart is empty
-            </p>
-            <p className="mt-1 text-xs text-[#9CA3AF]">
-              Add items from the Reorder page.
-            </p>
+            <span className="text-sm font-semibold text-[#111111]">PO Cart</span>
+            <span className="text-xs text-[#9CA3AF]">{totalItems} items</span>
           </div>
-        ) : (
-          groups.map((group) => (
-            <CartGroupCard
-              key={group.supplierExternalId ?? "UNASSIGNED"}
-              group={group}
-            />
-          ))
-        )}
-      </div>
+          <div className="flex items-center gap-1">
+            {totalItems > 0 ? (
+              <button
+                type="button"
+                onClick={() => setShowClearConfirm(true)}
+                className="rounded-lg px-2 py-1.5 text-xs font-medium text-[#6B7280] hover:bg-[#F3F4F6] hover:text-[#111111]"
+              >
+                Clear all
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={close}
+              className="rounded-lg p-2 text-[#9CA3AF] hover:bg-[#F3F4F6] hover:text-[#111111]"
+              aria-label="Close purchase order cart"
+            >
+              <i className="ti ti-x text-lg" aria-hidden="true" />
+            </button>
+          </div>
+        </header>
 
-      {totalItems > 0 ? (
-        <div className="border-t border-[#E5E7EB] bg-white p-4">
-          <Link
-            href="/purchase-orders/review"
-            onClick={close}
-            className="flex w-full items-center justify-center rounded-xl bg-[#CC2B2B] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#B02626]"
-          >
-            Review cart ({totalItems} item{totalItems === 1 ? "" : "s"})
-          </Link>
+        <div className="flex-1 overflow-y-auto pb-4">
+          {groups.length === 0 ? (
+            <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+              <i
+                className="ti ti-shopping-cart-off text-[32px] text-[#9CA3AF]"
+                aria-hidden="true"
+              />
+              <p className="mt-3 text-sm font-medium text-[#111111]">
+                Cart is empty
+              </p>
+              <p className="mt-1 text-xs text-[#9CA3AF]">
+                Add items from the Reorder page.
+              </p>
+            </div>
+          ) : (
+            groups.map((group) => (
+              <CartGroupCard
+                key={group.supplierExternalId ?? "UNASSIGNED"}
+                group={group}
+              />
+            ))
+          )}
         </div>
-      ) : null}
-    </aside>
+
+        {totalItems > 0 ? (
+          <div className="border-t border-[#E5E7EB] bg-white p-4">
+            <Link
+              href="/purchase-orders/review"
+              onClick={close}
+              className="flex w-full items-center justify-center rounded-xl bg-[#CC2B2B] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#B02626]"
+            >
+              Review cart ({totalItems} item{totalItems === 1 ? "" : "s"})
+            </Link>
+          </div>
+        ) : null}
+      </aside>
+
+      <Modal
+        open={showClearConfirm}
+        onClose={() => {
+          if (!isClearing) {
+            setShowClearConfirm(false);
+          }
+        }}
+        ariaLabelledBy="po-cart-clear-title"
+        className="max-w-md"
+      >
+        <h3
+          id="po-cart-clear-title"
+          className="text-lg font-semibold text-[#111111]"
+        >
+          Clear purchase order cart?
+        </h3>
+        <p className="mt-2 text-sm text-[#6B7280]">
+          Clear all items from your purchase order cart?
+        </p>
+        <div className="mt-6 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => setShowClearConfirm(false)}
+            disabled={isClearing}
+            className="rounded-xl border border-[#E5E7EB] bg-white px-4 py-2 text-sm font-medium text-[#374151] hover:bg-[#F9FAFB] disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void handleConfirmClear();
+            }}
+            disabled={isClearing}
+            className="rounded-xl bg-[#CC2B2B] px-4 py-2 text-sm font-medium text-white hover:bg-[#B02626] disabled:opacity-60"
+          >
+            {isClearing ? "Clearing..." : "Clear all"}
+          </button>
+        </div>
+      </Modal>
+    </>
   );
 }

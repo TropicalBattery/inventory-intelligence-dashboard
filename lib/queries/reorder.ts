@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { assignAbcClasses } from "@/lib/reorder/abc";
 import { buildReorderRecommendation } from "@/lib/reorder-engine";
+import { getOpenPoLinesBySku } from "@/lib/queries/open-po-lines";
 import { fetchAllReorderInputRows } from "@/lib/queries/reorder-inputs";
 import { getSupplierNameMap } from "@/lib/queries/suppliers";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -19,19 +20,42 @@ function withSupplierNames(
   }));
 }
 
+function withOpenPoLines(
+  recommendations: ReorderRecommendation[],
+  openPoBySku: Awaited<ReturnType<typeof getOpenPoLinesBySku>>
+): ReorderRecommendation[] {
+  return recommendations.map((rec) => {
+    const refs = openPoBySku.get(rec.sku) ?? [];
+    const openPoQty = refs.reduce((sum, ref) => {
+      const qty = Number.isFinite(ref.quantity) ? ref.quantity : 0;
+      return sum + qty;
+    }, 0);
+
+    return {
+      ...rec,
+      openPoQty,
+      openPoRefs: refs,
+    };
+  });
+}
+
 export const getReorderRecommendations = cache(
   async (tenantId: string): Promise<ReorderRecommendation[]> => {
     if (tenantId !== TENANT_ID) {
       return [];
     }
 
-    const [rows, nameMap] = await Promise.all([
+    const [rows, nameMap, openPoBySku] = await Promise.all([
       fetchAllReorderInputRows(createAdminClient()),
       getSupplierNameMap(),
+      getOpenPoLinesBySku(),
     ]);
-    const recommendations = withSupplierNames(
-      rows.map((row) => buildReorderRecommendation(row)),
-      nameMap
+    const recommendations = withOpenPoLines(
+      withSupplierNames(
+        rows.map((row) => buildReorderRecommendation(row)),
+        nameMap
+      ),
+      openPoBySku
     );
 
     // Relative Pareto ranking over active demand set only (exclude no_demand).

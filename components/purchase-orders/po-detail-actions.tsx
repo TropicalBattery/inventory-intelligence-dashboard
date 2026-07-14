@@ -5,23 +5,31 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { PoStatusBadge } from "@/components/po/po-status-badge";
 import { PoTransitionButtons } from "@/components/po/po-transition-buttons";
+import type { UserRole } from "@/lib/auth/role-guards";
 import { formatCurrencyUSD, formatDateTime } from "@/lib/format";
 import type { PurchaseOrderDocument } from "@/lib/types";
 
 type PoDetailActionsProps = {
   purchaseOrder: PurchaseOrderDocument;
+  userRole: UserRole;
+  userEmail: string;
 };
 
 const iconButtonClassName =
   "flex h-9 w-9 items-center justify-center rounded-lg border border-[#E5E7EB] text-[#6B7280] transition-colors hover:border-[#CC2B2B] hover:text-[#CC2B2B] disabled:cursor-not-allowed disabled:opacity-60";
 
-export function PoDetailActions({ purchaseOrder }: PoDetailActionsProps) {
+export function PoDetailActions({
+  purchaseOrder,
+  userRole,
+  userEmail,
+}: PoDetailActionsProps) {
   const router = useRouter();
   const [showConfirm, setShowConfirm] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [status, setStatus] = useState(purchaseOrder.status);
   const [sentAt, setSentAt] = useState(purchaseOrder.sentAt ?? null);
+  const [submittedBanner, setSubmittedBanner] = useState<string | null>(null);
 
   useEffect(() => {
     setStatus(purchaseOrder.status);
@@ -37,6 +45,7 @@ export function PoDetailActions({ purchaseOrder }: PoDetailActionsProps) {
       "Supplier not specified",
     formatDateTime(purchaseOrder.poDate),
     sentAt ? `Sent ${formatDateTime(sentAt)}` : null,
+    purchaseOrder.createdBy ? `Raised by ${purchaseOrder.createdBy}` : null,
   ].filter((part): part is string => Boolean(part));
 
   function handleSendEmail() {
@@ -67,6 +76,14 @@ export function PoDetailActions({ purchaseOrder }: PoDetailActionsProps) {
 
   return (
     <div className="space-y-6">
+      {submittedBanner ? (
+        <div
+          role="status"
+          className="rounded-2xl border border-[#86EFAC] bg-[#F0FDF4] px-4 py-3 text-sm text-[#166534]"
+        >
+          {submittedBanner} submitted for approval
+        </div>
+      ) : null}
       <section className="flex flex-wrap items-center gap-6 rounded-2xl bg-white px-6 py-4 shadow-card">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3">
@@ -94,8 +111,17 @@ export function PoDetailActions({ purchaseOrder }: PoDetailActionsProps) {
         <div className="mt-0 flex shrink-0 flex-wrap items-center gap-2 max-sm:mt-3 max-sm:w-full">
           <PoTransitionButtons
             poId={purchaseOrder.id}
-            status={purchaseOrder.status}
+            status={status}
+            userRole={userRole}
+            userEmail={userEmail}
+            createdBy={purchaseOrder.createdBy}
             layout="toolbar"
+            onTransitionSuccess={({ status: nextStatus, poNumber, toStatus }) => {
+              setStatus(nextStatus);
+              if (toStatus === "pending_approval") {
+                setSubmittedBanner(poNumber);
+              }
+            }}
           />
 
           <a

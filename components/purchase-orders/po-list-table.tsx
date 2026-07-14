@@ -4,13 +4,20 @@ import { PoListCard } from "@/components/purchase-orders/po-list-card";
 import { PoSummaryCards } from "@/components/purchase-orders/po-summary-cards";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
+import type { UserRole } from "@/lib/auth/role-guards";
 import type { PurchaseOrderListItem } from "@/lib/types";
 
 type PoListTableProps = {
   orders: PurchaseOrderListItem[];
+  userRole: UserRole;
+  userEmail: string;
 };
 
-export function PoListTable({ orders }: PoListTableProps) {
+export function PoListTable({
+  orders,
+  userRole,
+  userEmail,
+}: PoListTableProps) {
   return (
     <div>
       <PoSummaryCards orders={orders} />
@@ -34,7 +41,12 @@ export function PoListTable({ orders }: PoListTableProps) {
       ) : (
         <div className="space-y-3">
           {orders.map((order) => (
-            <PoListCard key={order.id} order={order} />
+            <PoListCard
+              key={order.id}
+              order={order}
+              userRole={userRole}
+              userEmail={userEmail}
+            />
           ))}
         </div>
       )}

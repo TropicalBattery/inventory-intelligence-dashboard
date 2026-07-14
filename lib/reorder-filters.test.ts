@@ -69,6 +69,8 @@ function makeRec(
     status: "no_demand",
     dataGaps: [],
     seasonality: null,
+    openPoQty: 0,
+    openPoRefs: [],
     ...overrides,
   };
 }

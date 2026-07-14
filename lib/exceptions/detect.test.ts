@@ -74,6 +74,8 @@ function rec(
     status: "ok",
     dataGaps: [],
     seasonality: null,
+    openPoQty: 0,
+    openPoRefs: [],
     ...overrides,
   };
 }

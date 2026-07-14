@@ -319,6 +319,8 @@ export function ReorderActionTab({
     DEFAULT_REORDER_ACTION_VIEW_FILTERS.supplierFilter
   );
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [bulkOpenPoConfirmPending, setBulkOpenPoConfirmPending] =
+    useState(false);
   const [sortKey, setSortKey] = useState<SortKey>(
     DEFAULT_REORDER_ACTION_VIEW_FILTERS.sortKey
   );
@@ -581,6 +583,18 @@ export function ReorderActionTab({
     [mainRecommendations, selectedKeys]
   );
 
+  const bulkOpenPoAffected = useMemo(
+    () =>
+      selectedRows.filter(
+        (rec) =>
+          rec.openPoQty > 0 &&
+          Number.isFinite(rec.openPoQty) &&
+          rec.suggestedQtyRounded > 0 &&
+          !isPurchaseBlockedRule(rec.purchaseRule)
+      ),
+    [selectedRows]
+  );
+
   const vendorPoCount = useMemo(() => {
     const suppliers = new Set<string>();
     for (const rec of selectedRows) {
@@ -635,6 +649,7 @@ export function ReorderActionTab({
 
   function toggleRowSelection(rec: ReorderRecommendation) {
     const key = rowKey(rec);
+    setBulkOpenPoConfirmPending(false);
     setSelectedKeys((current) => {
       const next = new Set(current);
       if (next.has(key)) {
@@ -647,6 +662,7 @@ export function ReorderActionTab({
   }
 
   function toggleSelectAllVisible() {
+    setBulkOpenPoConfirmPending(false);
     setSelectedKeys((current) => {
       const next = new Set(current);
       if (allVisibleSelected) {
@@ -689,6 +705,19 @@ export function ReorderActionTab({
       return;
     }
 
+    const affectedOpenPo = selectedRows.filter(
+      (rec) =>
+        rec.openPoQty > 0 &&
+        rec.suggestedQtyRounded > 0 &&
+        !isPurchaseBlockedRule(rec.purchaseRule)
+    );
+
+    if (affectedOpenPo.length > 0 && !bulkOpenPoConfirmPending) {
+      setBulkOpenPoConfirmPending(true);
+      return;
+    }
+
+    setBulkOpenPoConfirmPending(false);
     setIsPending(true);
     try {
       await addItems(items);
@@ -1139,10 +1168,27 @@ export function ReorderActionTab({
                         className="max-w-[160px] truncate"
                         title={rec.supplierExternalId ?? undefined}
                       >
-                        {resolveSupplierDisplayName(
-                          rec.supplierName,
-                          rec.supplierExternalId
-                        )}
+                        <span className="inline-flex max-w-full items-center gap-1.5">
+                          <span className="truncate">
+                            {resolveSupplierDisplayName(
+                              rec.supplierName,
+                              rec.supplierExternalId
+                            )}
+                          </span>
+                          {rec.openPoQty > 0 ? (
+                            <span
+                              className="shrink-0 rounded-full bg-[#EFF6FF] px-1.5 text-[10px] font-medium text-[#1D4ED8]"
+                              title={rec.openPoRefs
+                                .map(
+                                  (ref) =>
+                                    `${ref.poNumber} (${ref.status.replace(/_/g, " ")})`
+                                )
+                                .join(", ")}
+                            >
+                              On PO: {formatNumber(rec.openPoQty)}
+                            </span>
+                          ) : null}
+                        </span>
                       </TableCell>
                       <TableCell>
                         <CoverBadge rec={rec} />
@@ -1275,10 +1321,27 @@ export function ReorderActionTab({
                           className="max-w-[160px] truncate"
                           title={rec.supplierExternalId ?? undefined}
                         >
-                          {resolveSupplierDisplayName(
-                            rec.supplierName,
-                            rec.supplierExternalId
-                          )}
+                          <span className="inline-flex max-w-full items-center gap-1.5">
+                            <span className="truncate">
+                              {resolveSupplierDisplayName(
+                                rec.supplierName,
+                                rec.supplierExternalId
+                              )}
+                            </span>
+                            {rec.openPoQty > 0 ? (
+                              <span
+                                className="shrink-0 rounded-full bg-[#EFF6FF] px-1.5 text-[10px] font-medium text-[#1D4ED8]"
+                                title={rec.openPoRefs
+                                  .map(
+                                    (ref) =>
+                                      `${ref.poNumber} (${ref.status.replace(/_/g, " ")})`
+                                  )
+                                  .join(", ")}
+                              >
+                                On PO: {formatNumber(rec.openPoQty)}
+                              </span>
+                            ) : null}
+                          </span>
                         </TableCell>
                         <TableCell>
                           <CoverBadge rec={rec} />
@@ -1319,24 +1382,80 @@ export function ReorderActionTab({
         </div>
       ) : null}
 
-      <div className="sticky bottom-0 z-40 -mx-2 flex items-center justify-between rounded-2xl border border-transparent shadow-card bg-white px-6 py-4 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-        <p className="text-sm text-slate-700">
-          {selectedRows.length} item{selectedRows.length === 1 ? "" : "s"}{" "}
-          selected across {vendorPoCount} supplier
-          {vendorPoCount === 1 ? "" : "s"}
-        </p>
-        <button
-          type="button"
-          disabled={isPending || selectedRows.length === 0}
-          onClick={() => {
-            void handleAddSelectedToPo();
-          }}
-          className="rounded-xl bg-tbc-red px-4 py-2 text-sm font-medium text-white transition-colors duration-150 hover:bg-tbc-red-hover disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {isPending
-            ? "Adding to cart..."
-            : `Add selected to PO (${selectedRows.length})`}
-        </button>
+      <div className="sticky bottom-0 z-40 -mx-2 space-y-3 rounded-2xl border border-transparent bg-white px-6 py-4 shadow-card shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+        {bulkOpenPoConfirmPending && bulkOpenPoAffected.length > 0 ? (
+          <div
+            role="status"
+            className="rounded-xl border border-[#BFDBFE] bg-[#EFF6FF] px-4 py-3 text-sm text-[#1E3A8A]"
+          >
+            <p className="font-medium">
+              Some selected SKUs already have units on platform POs. Add
+              anyway?
+            </p>
+            <ul className="mt-2 max-h-32 space-y-1 overflow-y-auto text-xs">
+              {bulkOpenPoAffected.map((rec) => {
+                const primary = rec.openPoRefs[0];
+                const statusLabel = primary
+                  ? primary.status.replace(/_/g, " ")
+                  : "";
+                return (
+                  <li key={rowKey(rec)}>
+                    {rec.sku}: {formatNumber(rec.openPoQty)} units
+                    {primary
+                      ? ` on ${primary.poNumber} (${statusLabel})`
+                      : ""}
+                    {rec.openPoRefs.length > 1
+                      ? ` +${rec.openPoRefs.length - 1} more`
+                      : ""}
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() => {
+                  void handleAddSelectedToPo();
+                }}
+                className="rounded-xl bg-tbc-red px-4 py-2 text-sm font-medium text-white transition-colors duration-150 hover:bg-tbc-red-hover disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isPending ? "Adding to cart..." : "Add anyway"}
+              </button>
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() => setBulkOpenPoConfirmPending(false)}
+                className="rounded-xl border border-[#E5E7EB] bg-white px-4 py-2 text-sm font-medium text-[#374151] hover:bg-[#F9FAFB] disabled:opacity-60"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-slate-700">
+            {selectedRows.length} item{selectedRows.length === 1 ? "" : "s"}{" "}
+            selected across {vendorPoCount} supplier
+            {vendorPoCount === 1 ? "" : "s"}
+          </p>
+          <button
+            type="button"
+            disabled={
+              isPending ||
+              selectedRows.length === 0 ||
+              (bulkOpenPoConfirmPending && bulkOpenPoAffected.length > 0)
+            }
+            onClick={() => {
+              void handleAddSelectedToPo();
+            }}
+            className="rounded-xl bg-tbc-red px-4 py-2 text-sm font-medium text-white transition-colors duration-150 hover:bg-tbc-red-hover disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isPending
+              ? "Adding to cart..."
+              : `Add selected to PO (${selectedRows.length})`}
+          </button>
+        </div>
       </div>
     </div>
   );

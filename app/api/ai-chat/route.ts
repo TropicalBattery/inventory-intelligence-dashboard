@@ -86,6 +86,18 @@ status includes draft, pending_approval, approved,
 sent, and suppressed (approval workflow). created_by
 is the authenticated user email when the PO was
 created from the dashboard cart.
+To answer "is there already a PO for SKU X?", join
+purchase_orders to purchase_order_lines on
+po_external_id = purchase_orders.external_id (or
+matching po_number). Treat draft, pending_approval,
+approved, and sent as open platform POs (not yet in
+GP qty-on-order). Suppressed is not open.
+
+TABLE: user_roles
+- id, tenant_id, email, role, created_at
+role is buyer or approver. Used for PO approval:
+only approvers can approve; creators cannot
+self-approve. Unknown emails default to buyer.
 
 TABLE: purchase_order_lines
 - id, external_id, po_external_id, po_number

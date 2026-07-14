@@ -2,41 +2,68 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { PoStatusBadge } from "@/components/po/po-status-badge";
+import {
+  getApproveBlockReason,
+  type UserRole,
+} from "@/lib/auth/role-guards";
 import { formatCurrencyUSD, formatDateTime } from "@/lib/format";
 import { canTransition } from "@/lib/po/approval";
 import type { PurchaseOrderListItem } from "@/lib/types";
 
 type PoListCardProps = {
   order: PurchaseOrderListItem;
+  userRole: UserRole;
+  userEmail: string;
 };
 
 const iconButtonClassName =
   "flex h-9 w-9 items-center justify-center rounded-lg border border-[#E5E7EB] text-[#6B7280] transition-colors hover:border-[#CC2B2B] hover:text-[#CC2B2B] disabled:cursor-not-allowed disabled:opacity-60";
 
-export function PoListCard({ order }: PoListCardProps) {
+export function PoListCard({ order, userRole, userEmail }: PoListCardProps) {
   const router = useRouter();
+  const [status, setStatus] = useState(order.status);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    setStatus(order.status);
+  }, [order.status]);
+
+  const approveBlockReason = getApproveBlockReason(
+    userRole,
+    userEmail,
+    order.createdBy
+  );
+
   const quick =
-    order.status === "draft" && canTransition("draft", "pending_approval")
+    status === "draft" && canTransition("draft", "pending_approval")
       ? { toStatus: "pending_approval" as const, label: "Submit for approval" }
-      : order.status === "pending_approval" &&
+      : status === "pending_approval" &&
           canTransition("pending_approval", "approved")
         ? { toStatus: "approved" as const, label: "Approve" }
         : null;
 
-  const canSuppress = canTransition(order.status, "suppressed");
+  const canSuppress = canTransition(status, "suppressed");
   const pdfUrl = `/api/purchase-orders/${order.id}/pdf`;
+  const approveBlocked =
+    quick?.toStatus === "approved" && Boolean(approveBlockReason);
 
   const metaParts = [
     order.supplierName?.trim() || "Supplier not specified",
     order.poDate ? formatDateTime(order.poDate) : null,
+    order.createdBy ? `Raised by ${order.createdBy}` : null,
   ].filter((part): part is string => Boolean(part));
 
-  async function runTransition(toStatus: "pending_approval" | "approved" | "suppressed") {
+  async function runTransition(
+    toStatus: "pending_approval" | "approved" | "suppressed"
+  ) {
+    if (toStatus === "approved" && approveBlockReason) {
+      setError(approveBlockReason);
+      return;
+    }
+
     setIsSubmitting(true);
     setError(null);
 
@@ -50,11 +77,24 @@ export function PoListCard({ order }: PoListCardProps) {
         }
       );
       const data = (await response.json().catch(() => null)) as {
+        status?: string;
+        poNumber?: string;
         error?: string;
       } | null;
 
       if (!response.ok) {
         throw new Error(data?.error ?? "Transition failed");
+      }
+
+      if (data?.status) {
+        setStatus(data.status);
+      }
+
+      if (toStatus === "pending_approval") {
+        const poNumber = data?.poNumber?.trim() || order.poNumber;
+        router.replace(
+          `/purchase-orders?submitted=${encodeURIComponent(poNumber)}`
+        );
       }
 
       router.refresh();
@@ -72,7 +112,7 @@ export function PoListCard({ order }: PoListCardProps) {
           <p className="truncate font-mono text-base font-bold text-[#111111]">
             {order.poNumber}
           </p>
-          <PoStatusBadge status={order.status} />
+          <PoStatusBadge status={status} />
         </div>
         <p className="mt-1 truncate text-xs text-[#6B7280]">
           {metaParts.join(" · ")}
@@ -97,7 +137,8 @@ export function PoListCard({ order }: PoListCardProps) {
         {quick ? (
           <button
             type="button"
-            disabled={isSubmitting}
+            disabled={isSubmitting || approveBlocked}
+            title={approveBlocked ? approveBlockReason ?? undefined : undefined}
             onClick={() => {
               void runTransition(quick.toStatus);
             }}

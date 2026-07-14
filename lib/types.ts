@@ -261,6 +261,18 @@ export type ReorderRecommendation = {
   dataGaps: string[];
   /** Auto-detected from monthly sales history; null when no history fetched. */
   seasonality: SeasonalityResult | null;
+  /**
+   * Units already on platform (dashboard) POs in draft / pending_approval /
+   * approved / sent. Distinct from GP quantityOnOrder.
+   */
+  openPoQty: number;
+  /** Open platform PO line refs for this SKU (for chip title + expanded panel). */
+  openPoRefs: Array<{
+    poId: string;
+    poNumber: string;
+    status: string;
+    quantity: number;
+  }>;
 };
 
 export type SupplierReference = {
@@ -361,6 +373,7 @@ export type PurchaseOrderRecord = {
   total_amount: number | null;
   memo: string | null;
   sent_at: string | null;
+  created_by: string | null;
   source_system: string;
   tenant_id: string;
 };
@@ -374,6 +387,7 @@ export type PurchaseOrderListItem = {
   totalAmount: number | null;
   status: string;
   sentAt: string | null;
+  createdBy: string | null;
 };
 
 export type PurchaseOrderLineDocument = {
@@ -394,6 +408,7 @@ export type PurchaseOrderDocument = {
   hasUnknownLineCosts: boolean;
   memo: string | null;
   sentAt: string | null;
+  createdBy: string | null;
   supplierExternalId: string | null;
   supplierName: string | null;
   supplierEmail: string | null;

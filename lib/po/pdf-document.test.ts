@@ -14,6 +14,7 @@ const samplePo: PurchaseOrderDocument = {
   memo:
     "Here is a draft cover note for the purchase order:\n\nThis purchase order has been raised to replenish fast-moving inventory ahead of expected demand.",
   sentAt: null,
+  createdBy: null,
   supplierExternalId: "FK020",
   supplierName: "FK020",
   supplierEmail: null,

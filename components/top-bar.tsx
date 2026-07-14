@@ -1,5 +1,6 @@
 "use client";
 
+import { NotificationsBell } from "@/components/notifications/notifications-bell";
 import { PoCartButton } from "@/components/po-cart/po-cart-button";
 import { getPageSubtitle, getPageTitle } from "@/lib/navigation";
 import { usePathname } from "next/navigation";
@@ -35,13 +36,7 @@ export function TopBar({ userEmail }: TopBarProps) {
         </div>
         <div className="flex shrink-0 items-center gap-3">
           <PoCartButton />
-          <button
-            type="button"
-            className="flex h-9 w-9 items-center justify-center rounded-full text-[#6B7280] transition-colors duration-150 hover:bg-[#F3F4F6] hover:text-[#111111]"
-            aria-label="Notifications"
-          >
-            <i className="ti ti-bell text-xl" aria-hidden="true" />
-          </button>
+          <NotificationsBell />
           <div
             className="flex h-8 w-8 items-center justify-center rounded-full bg-tbc-red-light text-sm font-medium text-tbc-red"
             aria-label={userEmail}

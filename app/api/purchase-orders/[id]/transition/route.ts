@@ -1,3 +1,5 @@
+import { getUserRole } from "@/lib/auth/roles";
+import { formatCurrencyUSD } from "@/lib/format";
 import { requireUserEmail } from "@/lib/po/cart-auth";
 import {
   canTransition,
@@ -6,6 +8,7 @@ import {
   transitionAction,
   type PoStatus,
 } from "@/lib/po/approval";
+import { emitNotification } from "@/lib/notifications/emit";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { TENANT_ID } from "@/lib/tenant";
 import { revalidatePath } from "next/cache";
@@ -49,7 +52,7 @@ export async function POST(request: Request, context: RouteContext) {
 
     const { data: order, error: loadError } = await supabase
       .from("purchase_orders")
-      .select("id, po_number, status, tenant_id")
+      .select("id, po_number, status, tenant_id, created_by, total_amount")
       .eq("id", poId)
       .eq("tenant_id", TENANT_ID)
       .maybeSingle();
@@ -93,6 +96,30 @@ export async function POST(request: Request, context: RouteContext) {
         },
         { status: 400 }
       );
+    }
+
+    if (toStatus === "approved") {
+      const role = await getUserRole(auth.email);
+      if (role !== "approver") {
+        return NextResponse.json(
+          { error: "Only approvers can approve purchase orders" },
+          { status: 403 }
+        );
+      }
+
+      const createdBy =
+        typeof order.created_by === "string" ? order.created_by.trim() : "";
+      if (
+        createdBy &&
+        createdBy.toLowerCase() === auth.email.trim().toLowerCase()
+      ) {
+        return NextResponse.json(
+          {
+            error: "You cannot approve a purchase order you created",
+          },
+          { status: 403 }
+        );
+      }
     }
 
     const now = new Date().toISOString();
@@ -153,9 +180,49 @@ export async function POST(request: Request, context: RouteContext) {
     revalidatePath("/purchase-orders");
     revalidatePath(`/purchase-orders/${poId}`);
 
+    const poNumber = updated.po_number ?? order.po_number ?? poId;
+    try {
+      if (toStatus === "pending_approval") {
+        const totalRaw =
+          typeof order.total_amount === "number"
+            ? order.total_amount
+            : order.total_amount != null
+              ? Number(order.total_amount)
+              : null;
+        const totalLabel = formatCurrencyUSD(
+          totalRaw !== null && Number.isFinite(totalRaw) ? totalRaw : null
+        );
+
+        await emitNotification({
+          recipientRole: "approver",
+          type: "po_pending_approval",
+          title: `${poNumber} awaiting approval`,
+          body: `Submitted by ${auth.email} - ${totalLabel}`,
+          link: `/purchase-orders/${poId}`,
+        });
+      } else if (toStatus === "approved" || toStatus === "suppressed") {
+        const createdBy =
+          typeof order.created_by === "string" ? order.created_by.trim() : "";
+        if (createdBy) {
+          await emitNotification({
+            recipientEmail: createdBy,
+            type: toStatus === "approved" ? "po_approved" : "po_suppressed",
+            title:
+              toStatus === "approved"
+                ? `${poNumber} approved by ${auth.email}`
+                : `${poNumber} suppressed by ${auth.email}`,
+            body: null,
+            link: `/purchase-orders/${poId}`,
+          });
+        }
+      }
+    } catch (notificationError) {
+      console.error("PO transition notification failed:", notificationError);
+    }
+
     return NextResponse.json({
       status: updated.status ?? toStatus,
-      poNumber: updated.po_number ?? order.po_number,
+      poNumber,
     });
   } catch (error) {
     console.error("POST /api/purchase-orders/[id]/transition failed:", error);

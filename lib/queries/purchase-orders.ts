@@ -22,7 +22,7 @@ export async function getPurchaseOrderList(): Promise<PurchaseOrderListItem[]> {
   const { data, error } = await supabase
     .from("purchase_orders")
     .select(
-      "id, external_id, po_number, supplier_external_id, po_date, total_amount, status, sent_at, source_system"
+      "id, external_id, po_number, supplier_external_id, po_date, total_amount, status, sent_at, created_by, source_system"
     )
     .eq("tenant_id", TENANT_ID)
     .order("po_date", { ascending: false, nullsFirst: false });
@@ -84,6 +84,7 @@ export async function getPurchaseOrderList(): Promise<PurchaseOrderListItem[]> {
         : Number(order.total_amount),
     status: order.status ?? "draft",
     sentAt: order.sent_at,
+    createdBy: order.created_by?.trim() || null,
   }));
 }
 
@@ -195,6 +196,7 @@ export async function getPurchaseOrderDocument(
     hasUnknownLineCosts: unknownLineCosts,
     memo: po.memo ? stripAiPreamble(po.memo) : null,
     sentAt: po.sent_at,
+    createdBy: po.created_by?.trim() || null,
     supplierExternalId,
     supplierName: supplierDisplayName,
     supplierEmail,

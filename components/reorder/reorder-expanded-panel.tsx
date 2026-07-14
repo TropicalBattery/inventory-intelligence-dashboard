@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { ReorderItemExplanationResult } from "@/app/(main)/reorder/ai-actions";
 import { usePoCart } from "@/components/po-cart/po-cart-provider";
+import { PoStatusBadge } from "@/components/po/po-status-badge";
 import { SeasonalWarningBadge } from "@/components/reorder/seasonal-warning-badge";
 import { AiFormattedText } from "@/components/reorder/ai-formatted-text";
 import { formatCurrencyJMD, formatNumber } from "@/lib/format";
@@ -491,6 +492,43 @@ function PipelineStockSection({
   );
 }
 
+function PlatformOpenPosSection({ rec }: { rec: ReorderRecommendation }) {
+  if (
+    !Number.isFinite(rec.openPoQty) ||
+    rec.openPoQty <= 0 ||
+    rec.openPoRefs.length === 0
+  ) {
+    return null;
+  }
+
+  return (
+    <div className="mb-5">
+      <h4 className="mb-1 text-xs font-semibold uppercase tracking-widest text-[#6B7280]">
+        Platform POs
+      </h4>
+      <p className="mb-3 text-xs text-[#9CA3AF]">
+        Platform POs (not yet in GP)
+      </p>
+      <ul className="space-y-2">
+        {rec.openPoRefs.map((ref) => (
+          <li key={`${ref.poId}-${ref.poNumber}`}>
+            <Link
+              href={`/purchase-orders/${ref.poId}`}
+              className="inline-flex flex-wrap items-center gap-2 text-sm text-[#111111] hover:text-[#CC2B2B]"
+            >
+              <span className="font-mono font-medium">{ref.poNumber}</span>
+              <span className="text-[#6B7280]">
+                — {formatNumber(ref.quantity)} units —
+              </span>
+              <PoStatusBadge status={ref.status} />
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function AnalysisSection({
   explanation,
   isLoadingExplanation,
@@ -711,6 +749,7 @@ export function ReorderExpandedPanel({
   const [addToPoError, setAddToPoError] = useState<string | null>(null);
   const [isAddingToPo, setIsAddingToPo] = useState(false);
   const [justAdded, setJustAdded] = useState(false);
+  const [openPoConfirmPending, setOpenPoConfirmPending] = useState(false);
   const { addItem, cartSkus } = usePoCart();
   const skuInCart = cartSkus.has(rec.sku);
 
@@ -726,6 +765,7 @@ export function ReorderExpandedPanel({
     setSelectedSupplierPrice(rec.supplierUnitPrice);
     setAddToPoError(null);
     setJustAdded(false);
+    setOpenPoConfirmPending(false);
   }, [
     rec.sku,
     rec.suggestedQtyRounded,
@@ -834,6 +874,15 @@ export function ReorderExpandedPanel({
       return;
     }
 
+    if (
+      Number.isFinite(rec.openPoQty) &&
+      rec.openPoQty > 0 &&
+      !openPoConfirmPending
+    ) {
+      setOpenPoConfirmPending(true);
+      return;
+    }
+
     setAddToPoError(null);
     setIsAddingToPo(true);
 
@@ -863,6 +912,7 @@ export function ReorderExpandedPanel({
         sourceStatus: rec.status,
       });
       setJustAdded(true);
+      setOpenPoConfirmPending(false);
     } catch (error) {
       setAddToPoError(
         error instanceof Error ? error.message : "Failed to add item to PO"
@@ -1020,6 +1070,46 @@ export function ReorderExpandedPanel({
           </div>
 
           <div className="mt-4 flex flex-col items-end gap-2">
+            {openPoConfirmPending &&
+            Number.isFinite(rec.openPoQty) &&
+            rec.openPoQty > 0 ? (
+              <div
+                role="status"
+                className="w-full max-w-md rounded-xl border border-[#BFDBFE] bg-[#EFF6FF] px-3 py-3 text-left text-sm text-[#1E3A8A]"
+              >
+                <p>
+                  {rec.sku} already has {formatNumber(rec.openPoQty)} units on{" "}
+                  {rec.openPoRefs[0]?.poNumber ?? "a platform PO"}
+                  {rec.openPoRefs[0]
+                    ? ` (${rec.openPoRefs[0].status.replace(/_/g, " ")})`
+                    : ""}
+                  {rec.openPoRefs.length > 1
+                    ? ` +${rec.openPoRefs.length - 1} more`
+                    : ""}
+                  . Add anyway?
+                </p>
+                <div className="mt-3 flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={isAddingToPo}
+                    onClick={() => {
+                      void handleAddToPo();
+                    }}
+                    className="rounded-xl bg-tbc-red px-3 py-1.5 text-sm font-medium text-white hover:bg-tbc-red-hover disabled:opacity-60"
+                  >
+                    {isAddingToPo ? "Adding..." : "Add anyway"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isAddingToPo}
+                    onClick={() => setOpenPoConfirmPending(false)}
+                    className="rounded-xl border border-[#E5E7EB] bg-white px-3 py-1.5 text-sm font-medium text-[#374151] hover:bg-[#F9FAFB] disabled:opacity-60"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : null}
             <span
               className={
                 !canAddToPo
@@ -1036,7 +1126,11 @@ export function ReorderExpandedPanel({
             >
               <button
                 type="button"
-                disabled={!canAddToPo || isAddingToPo}
+                disabled={
+                  !canAddToPo ||
+                  isAddingToPo ||
+                  (openPoConfirmPending && rec.openPoQty > 0)
+                }
                 onClick={() => {
                   void handleAddToPo();
                 }}
@@ -1240,6 +1334,8 @@ export function ReorderExpandedPanel({
       ) : null}
 
       <PipelineStockSection rec={rec} pipeline={pipeline} />
+
+      <PlatformOpenPosSection rec={rec} />
 
       <InventoryDetailsSection rec={rec} lineTotal={lineTotal} />
     </div>

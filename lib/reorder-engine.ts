@@ -613,6 +613,8 @@ export function buildReorderRecommendation(
     status,
     dataGaps,
     seasonality: row.seasonality ?? null,
+    openPoQty: 0,
+    openPoRefs: [],
   };
 }
 

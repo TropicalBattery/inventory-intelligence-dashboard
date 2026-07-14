@@ -3,6 +3,10 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
+  getApproveBlockReason,
+  type UserRole,
+} from "@/lib/auth/role-guards";
+import {
   ALLOWED_TRANSITIONS,
   isPoStatus,
   type PoStatus,
@@ -11,8 +15,16 @@ import {
 type PoTransitionButtonsProps = {
   poId: string;
   status: string;
+  userRole: UserRole;
+  userEmail: string;
+  createdBy: string | null;
   /** toolbar = single-row primary + icon suppress/ghosts (detail header) */
   layout?: "stack" | "toolbar";
+  onTransitionSuccess?: (result: {
+    status: string;
+    poNumber: string;
+    toStatus: PoStatus;
+  }) => void;
 };
 
 type TransitionIntent = {
@@ -77,7 +89,11 @@ const iconButtonClassName =
 export function PoTransitionButtons({
   poId,
   status,
+  userRole,
+  userEmail,
+  createdBy,
   layout = "stack",
+  onTransitionSuccess,
 }: PoTransitionButtonsProps) {
   const router = useRouter();
   const [currentStatus, setCurrentStatus] = useState(status);
@@ -90,6 +106,11 @@ export function PoTransitionButtons({
   useEffect(() => {
     setCurrentStatus(status);
   }, [status]);
+
+  const approveBlockReason = useMemo(
+    () => getApproveBlockReason(userRole, userEmail, createdBy),
+    [userRole, userEmail, createdBy]
+  );
 
   const intents = useMemo(() => {
     if (!isPoStatus(currentStatus)) {
@@ -120,6 +141,7 @@ export function PoTransitionButtons({
       );
       const data = (await response.json().catch(() => null)) as {
         status?: string;
+        poNumber?: string;
         error?: string;
       } | null;
 
@@ -131,6 +153,11 @@ export function PoTransitionButtons({
       setPendingTo(null);
       setNote("");
       setSuccess(`Status updated to ${data.status.replace(/_/g, " ")}`);
+      onTransitionSuccess?.({
+        status: data.status,
+        poNumber: data.poNumber?.trim() || poId,
+        toStatus,
+      });
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Transition failed");
@@ -142,6 +169,11 @@ export function PoTransitionButtons({
   function handleIntentClick(intent: TransitionIntent) {
     setError(null);
     setSuccess(null);
+
+    if (intent.toStatus === "approved" && approveBlockReason) {
+      setError(approveBlockReason);
+      return;
+    }
 
     if (intent.needsNote) {
       setPendingTo(intent.toStatus);
@@ -178,6 +210,9 @@ export function PoTransitionButtons({
     >
       <div className="flex flex-wrap items-center gap-2">
         {intents.map((intent) => {
+          const isApproveBlocked =
+            intent.toStatus === "approved" && Boolean(approveBlockReason);
+
           if (toolbar && intent.toStatus === "suppressed") {
             return (
               <button
@@ -190,6 +225,25 @@ export function PoTransitionButtons({
                 className={iconButtonClassName}
               >
                 <i className="ti ti-ban text-base" aria-hidden="true" />
+              </button>
+            );
+          }
+
+          if (isApproveBlocked) {
+            return (
+              <button
+                key={intent.toStatus}
+                type="button"
+                disabled
+                title={approveBlockReason ?? undefined}
+                aria-label={approveBlockReason ?? intent.label}
+                className={
+                  intent.variant === "primary"
+                    ? primaryClassName
+                    : ghostClassName
+                }
+              >
+                {intent.label}
               </button>
             );
           }

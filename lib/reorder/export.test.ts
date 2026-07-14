@@ -66,6 +66,8 @@ function rec(
     status: "critical",
     dataGaps: [],
     seasonality: null,
+    openPoQty: 0,
+    openPoRefs: [],
     ...overrides,
   };
 }

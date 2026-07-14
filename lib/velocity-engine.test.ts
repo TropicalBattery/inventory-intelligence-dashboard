@@ -90,6 +90,8 @@ function baseReorderRow(
     status: "reorder_needed",
     dataGaps: [],
     seasonality: null,
+    openPoQty: 0,
+    openPoRefs: [],
     ...overrides,
   };
 }
