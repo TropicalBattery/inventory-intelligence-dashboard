@@ -2,6 +2,14 @@
 
 import { Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import {
+  ListingToolbar,
+  listingControlClassName,
+  listingExportButtonClassName,
+  listingLabelClassName,
+  listingSearchInputClassName,
+} from "@/components/shared/listing-toolbar";
+import { MultiSelectFilter } from "@/components/shared/multi-select-filter";
 import { Card } from "@/components/ui/Card";
 import {
   Table,
@@ -12,12 +20,14 @@ import {
   TableRow,
 } from "@/components/ui/Table";
 import { formatNumber } from "@/lib/format";
+import {
+  buildDatedExportFilename,
+  exportRowsToCsv,
+  type ExportColumnDef,
+} from "@/lib/listing/export";
 import type { ReorderRecommendation } from "@/lib/types";
 
 const PAGE_SIZE = 25;
-
-const filterSelectClassName =
-  "h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-tbc-red focus:outline-none focus:ring-2 focus:ring-tbc-red/20";
 
 const tableCellClassName = "py-2";
 
@@ -26,6 +36,24 @@ type SortOption = "sku-asc" | "name-asc" | "qty-desc";
 type ReorderUnclassifiedTabProps = {
   recommendations: ReorderRecommendation[];
 };
+
+type UnclassifiedExportRow = {
+  sku: string;
+  name: string;
+  itemClass: string;
+  category: string;
+  qtyAvailable: string;
+  annualDemandUnits: string;
+};
+
+const UNCLASSIFIED_EXPORT_COLUMNS: ExportColumnDef<UnclassifiedExportRow>[] = [
+  { key: "sku", header: "SKU" },
+  { key: "name", header: "Name" },
+  { key: "itemClass", header: "Item Class" },
+  { key: "category", header: "Category" },
+  { key: "qtyAvailable", header: "Qty Available", align: "right" },
+  { key: "annualDemandUnits", header: "Annual Demand Units", align: "right" },
+];
 
 function isDeadStockRow(rec: ReorderRecommendation): boolean {
   return (
@@ -69,11 +97,24 @@ function sortRows(
   return sorted;
 }
 
+function buildUnclassifiedExportRows(
+  rows: ReorderRecommendation[]
+): UnclassifiedExportRow[] {
+  return rows.map((rec) => ({
+    sku: rec.sku,
+    name: rec.name?.trim() || "-",
+    itemClass: rec.itemClass?.trim() || "-",
+    category: rec.category?.trim() || "-",
+    qtyAvailable: formatNumber(rec.quantityAvailable),
+    annualDemandUnits: formatAnnualDemand(rec.annualDemandUnits),
+  }));
+}
+
 export function ReorderUnclassifiedTab({
   recommendations,
 }: ReorderUnclassifiedTabProps) {
   const [searchQuery, setSearchQuery] = useState("");
-  const [classFilter, setClassFilter] = useState("all");
+  const [classFilter, setClassFilter] = useState<string[]>([]);
   const [sortOption, setSortOption] = useState<SortOption>("sku-asc");
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -86,7 +127,9 @@ export function ReorderUnclassifiedTab({
       }
     }
 
-    return Array.from(values).sort((left, right) => left.localeCompare(right));
+    return Array.from(values)
+      .sort((left, right) => left.localeCompare(right))
+      .map((value) => ({ value, label: value }));
   }, [recommendations]);
 
   const deadStockCount = useMemo(
@@ -96,9 +139,11 @@ export function ReorderUnclassifiedTab({
 
   const filteredRows = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
+    const classSet =
+      classFilter.length > 0 ? new Set(classFilter) : null;
 
     const rows = recommendations.filter((rec) => {
-      if (classFilter !== "all" && rec.itemClass !== classFilter) {
+      if (classSet && (!rec.itemClass || !classSet.has(rec.itemClass))) {
         return false;
       }
 
@@ -134,6 +179,12 @@ export function ReorderUnclassifiedTab({
     }
   }, [currentPage, totalPages]);
 
+  function handleExportCsv() {
+    const exportRows = buildUnclassifiedExportRows(filteredRows);
+    const filename = buildDatedExportFilename("unclassified", "csv");
+    exportRowsToCsv(UNCLASSIFIED_EXPORT_COLUMNS, exportRows, filename);
+  }
+
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-transparent shadow-card bg-slate-50 px-4 py-3 text-sm text-slate-700">
@@ -148,71 +199,75 @@ export function ReorderUnclassifiedTab({
         </p>
       ) : null}
 
-      <div className="flex flex-wrap items-end gap-4 rounded-2xl border border-transparent shadow-card bg-white p-4">
-        <div className="min-w-[220px] flex-1">
-          <label
-            htmlFor="unclassified-search"
-            className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500"
-          >
-            Search
-          </label>
-          <div className="relative">
-            <Search
-              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-              aria-hidden="true"
-            />
-            <input
-              id="unclassified-search"
-              type="search"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search SKU or name"
-              className="h-10 w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-slate-900 focus:border-tbc-red focus:outline-none focus:ring-2 focus:ring-tbc-red/20"
-            />
+      <ListingToolbar
+        filters={
+          <MultiSelectFilter
+            label="Item Class"
+            options={classOptions}
+            selected={classFilter}
+            onChange={setClassFilter}
+            placeholder="All classes"
+            className="min-w-[180px]"
+          />
+        }
+        search={
+          <>
+            <label
+              htmlFor="unclassified-search"
+              className={listingLabelClassName}
+            >
+              Search
+            </label>
+            <div className="relative">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                aria-hidden="true"
+              />
+              <input
+                id="unclassified-search"
+                type="search"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search SKU or name"
+                className={listingSearchInputClassName}
+              />
+            </div>
+          </>
+        }
+        sort={
+          <div className="min-w-[220px]">
+            <label
+              htmlFor="unclassified-sort"
+              className={listingLabelClassName}
+            >
+              Sort
+            </label>
+            <select
+              id="unclassified-sort"
+              value={sortOption}
+              onChange={(event) =>
+                setSortOption(event.target.value as SortOption)
+              }
+              className={`${listingControlClassName} w-full min-w-[220px]`}
+            >
+              <option value="sku-asc">SKU A-Z</option>
+              <option value="name-asc">Name A-Z</option>
+              <option value="qty-desc">Qty Available (high to low)</option>
+            </select>
           </div>
-        </div>
-
-        <div className="min-w-[180px]">
-          <label
-            htmlFor="unclassified-class-filter"
-            className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500"
+        }
+        actions={
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            disabled={filteredRows.length === 0}
+            className={listingExportButtonClassName}
+            title="Download the currently filtered rows as CSV"
           >
-            Item Class
-          </label>
-          <select
-            id="unclassified-class-filter"
-            value={classFilter}
-            onChange={(event) => setClassFilter(event.target.value)}
-            className={`${filterSelectClassName} w-full min-w-[180px]`}
-          >
-            <option value="all">All classes</option>
-            {classOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="min-w-[220px]">
-          <label
-            htmlFor="unclassified-sort"
-            className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500"
-          >
-            Sort
-          </label>
-          <select
-            id="unclassified-sort"
-            value={sortOption}
-            onChange={(event) => setSortOption(event.target.value as SortOption)}
-            className={`${filterSelectClassName} w-full min-w-[220px]`}
-          >
-            <option value="sku-asc">SKU A-Z</option>
-            <option value="name-asc">Name A-Z</option>
-            <option value="qty-desc">Qty Available (high to low)</option>
-          </select>
-        </div>
-      </div>
+            Export CSV
+          </button>
+        }
+      />
 
       <Card className="rounded-2xl p-0">
         {filteredRows.length === 0 ? (
@@ -221,78 +276,84 @@ export function ReorderUnclassifiedTab({
           </div>
         ) : (
           <>
-              <Table containerClassName="rounded-2xl border-0 !overflow-visible">
-                <colgroup>
-                  <col className="w-36" />
-                  <col />
-                  <col className="w-36" />
-                  <col className="w-32" />
-                  <col className="w-28" />
-                  <col className="w-36" />
-                </colgroup>
-                <TableHeader className="bg-[#F9FAFB] [&_th]:sticky [&_th]:top-[5.125rem] [&_th]:z-20 [&_th]:bg-[#F9FAFB]">
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className={`w-36 ${tableCellClassName}`}>
-                      SKU
-                    </TableHead>
-                    <TableHead className={tableCellClassName}>Name</TableHead>
-                    <TableHead className={`w-36 ${tableCellClassName}`}>
-                      Item Class
-                    </TableHead>
-                    <TableHead className={`w-32 ${tableCellClassName}`}>
-                      Category
-                    </TableHead>
-                    <TableHead className={`w-28 text-right ${tableCellClassName}`}>
-                      Qty Available
-                    </TableHead>
-                    <TableHead className={`w-36 text-right ${tableCellClassName}`}>
-                      Annual Demand Units
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {paginatedRows.map((rec) => (
-                    <TableRow
-                      key={rec.sku}
-                      className={
-                        isDeadStockRow(rec) ? "opacity-50 hover:bg-slate-50" : undefined
-                      }
+            <Table containerClassName="rounded-2xl border-0 !overflow-visible">
+              <colgroup>
+                <col className="w-36" />
+                <col />
+                <col className="w-36" />
+                <col className="w-32" />
+                <col className="w-28" />
+                <col className="w-36" />
+              </colgroup>
+              <TableHeader className="bg-[#F9FAFB] [&_th]:sticky [&_th]:top-[5.125rem] [&_th]:z-20 [&_th]:bg-[#F9FAFB]">
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className={`w-36 ${tableCellClassName}`}>
+                    SKU
+                  </TableHead>
+                  <TableHead className={tableCellClassName}>Name</TableHead>
+                  <TableHead className={`w-36 ${tableCellClassName}`}>
+                    Item Class
+                  </TableHead>
+                  <TableHead className={`w-32 ${tableCellClassName}`}>
+                    Category
+                  </TableHead>
+                  <TableHead
+                    className={`w-28 text-right ${tableCellClassName}`}
+                  >
+                    Qty Available
+                  </TableHead>
+                  <TableHead
+                    className={`w-36 text-right ${tableCellClassName}`}
+                  >
+                    Annual Demand Units
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {paginatedRows.map((rec) => (
+                  <TableRow
+                    key={rec.sku}
+                    className={
+                      isDeadStockRow(rec)
+                        ? "opacity-50 hover:bg-slate-50"
+                        : undefined
+                    }
+                  >
+                    <TableCell
+                      className={`w-36 font-mono text-sm font-medium text-slate-900 ${tableCellClassName}`}
                     >
-                      <TableCell
-                        className={`w-36 font-mono text-sm font-medium text-slate-900 ${tableCellClassName}`}
-                      >
-                        {rec.sku}
-                      </TableCell>
-                      <TableCell
-                        className={`min-w-0 ${tableCellClassName}`}
-                        title={rec.name ?? undefined}
-                      >
-                        <span className="line-clamp-2">{rec.name ?? "-"}</span>
-                      </TableCell>
-                      <TableCell className={`w-36 ${tableCellClassName}`}>
-                        {rec.itemClass ?? "-"}
-                      </TableCell>
-                      <TableCell className={`w-32 ${tableCellClassName}`}>
-                        {rec.category ?? "-"}
-                      </TableCell>
-                      <TableCell
-                        className={`w-28 text-right tabular-nums ${tableCellClassName} ${
-                          rec.quantityAvailable <= 0
-                            ? "font-semibold text-red-600"
-                            : ""
-                        }`}
-                      >
-                        {formatNumber(rec.quantityAvailable)}
-                      </TableCell>
-                      <TableCell
-                        className={`w-36 text-right tabular-nums ${tableCellClassName}`}
-                      >
-                        {formatAnnualDemand(rec.annualDemandUnits)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                      {rec.sku}
+                    </TableCell>
+                    <TableCell
+                      className={`min-w-0 ${tableCellClassName}`}
+                      title={rec.name ?? undefined}
+                    >
+                      <span className="line-clamp-2">{rec.name ?? "-"}</span>
+                    </TableCell>
+                    <TableCell className={`w-36 ${tableCellClassName}`}>
+                      {rec.itemClass ?? "-"}
+                    </TableCell>
+                    <TableCell className={`w-32 ${tableCellClassName}`}>
+                      {rec.category ?? "-"}
+                    </TableCell>
+                    <TableCell
+                      className={`w-28 text-right tabular-nums ${tableCellClassName} ${
+                        rec.quantityAvailable <= 0
+                          ? "font-semibold text-red-600"
+                          : ""
+                      }`}
+                    >
+                      {formatNumber(rec.quantityAvailable)}
+                    </TableCell>
+                    <TableCell
+                      className={`w-36 text-right tabular-nums ${tableCellClassName}`}
+                    >
+                      {formatAnnualDemand(rec.annualDemandUnits)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
 
             <div className="flex flex-col items-end gap-2 border-t border-slate-100 px-6 py-3 sm:flex-row sm:items-center sm:justify-end sm:gap-3">
               <button

@@ -2,43 +2,37 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "@/components/ui/Modal";
-import {
-  DEFAULT_REORDER_ACTION_VIEW_FILTERS,
-  REORDER_ACTION_VIEW_PAGE,
-  normalizeViewName,
-  reorderActionViewFiltersEqual,
-  type ReorderActionViewFilters,
-} from "@/lib/reorder/view-filters";
+import { normalizeViewName } from "@/lib/reorder/view-filters";
+import type { SavedViewPage } from "@/lib/saved-views/pages";
 import type { SavedViewRecord } from "@/lib/saved-views/store";
 
-type SavedViewsControlsProps = {
-  filters: ReorderActionViewFilters;
-  onApply: (filters: ReorderActionViewFilters) => void;
+type SavedViewsControlsProps<TFilters extends object> = {
+  page: SavedViewPage;
+  filters: TFilters;
+  defaultFilters: TFilters;
+  onApply: (filters: TFilters) => void;
   onError: (message: string | null) => void;
+  parseFilters: (raw: unknown) => TFilters;
+  filtersEqual: (left: TFilters, right: TFilters) => boolean;
+  suggestName?: (filters: TFilters) => string;
+  /** Accessible hint for the "Set default" control. */
+  defaultHint?: string;
 };
 
 const buttonClassName =
   "rounded-lg border border-[#E5E7EB] bg-white px-2.5 py-1 text-xs font-medium text-[#374151] transition-colors hover:bg-[#F9FAFB] disabled:cursor-not-allowed disabled:opacity-60";
 
-function suggestedViewName(
-  filters: ReorderActionViewFilters,
-  selectedView: SavedViewRecord | null,
-  matchesSelected: boolean
-): string {
-  if (selectedView && matchesSelected) {
-    return selectedView.name;
-  }
-  if (filters.supplierFilter !== "all") {
-    return `${filters.statusFilter} · ${filters.supplierFilter}`;
-  }
-  return `${filters.statusFilter} view`;
-}
-
-export function SavedViewsControls({
+export function SavedViewsControls<TFilters extends object>({
+  page,
   filters,
+  defaultFilters,
   onApply,
   onError,
-}: SavedViewsControlsProps) {
+  parseFilters,
+  filtersEqual,
+  suggestName,
+  defaultHint = "Apply this view automatically when you open this page",
+}: SavedViewsControlsProps<TFilters>) {
   const [views, setViews] = useState<SavedViewRecord[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [isLoading, setIsLoading] = useState(true);
@@ -55,13 +49,18 @@ export function SavedViewsControls({
     [selectedId, views]
   );
 
+  const selectedParsedFilters = useMemo(
+    () => (selectedView ? parseFilters(selectedView.filters) : null),
+    [selectedView, parseFilters]
+  );
+
   const matchesSelected =
-    selectedView != null &&
-    reorderActionViewFiltersEqual(filters, selectedView.filters);
+    selectedParsedFilters != null &&
+    filtersEqual(filters, selectedParsedFilters);
 
   const loadViews = useCallback(async (): Promise<SavedViewRecord[]> => {
     const response = await fetch(
-      `/api/saved-views?page=${encodeURIComponent(REORDER_ACTION_VIEW_PAGE)}`
+      `/api/saved-views?page=${encodeURIComponent(page)}`
     );
     const payload = (await response.json()) as {
       views?: SavedViewRecord[];
@@ -71,7 +70,7 @@ export function SavedViewsControls({
       throw new Error(payload.error ?? "Failed to load saved views");
     }
     return payload.views ?? [];
-  }, []);
+  }, [page]);
 
   useEffect(() => {
     let cancelled = false;
@@ -88,7 +87,7 @@ export function SavedViewsControls({
           const defaultView = nextViews.find((view) => view.isDefault);
           if (defaultView) {
             setSelectedId(defaultView.id);
-            onApply(defaultView.filters);
+            onApply(parseFilters(defaultView.filters));
           }
           setAppliedDefault(true);
         }
@@ -111,9 +110,9 @@ export function SavedViewsControls({
     return () => {
       cancelled = true;
     };
-    // Intentionally once on mount for default apply.
+    // Intentionally once on mount for default apply (per page).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [page]);
 
   useEffect(() => {
     if (!saveOpen) {
@@ -143,18 +142,28 @@ export function SavedViewsControls({
     onError(null);
 
     if (!nextId) {
-      onApply({ ...DEFAULT_REORDER_ACTION_VIEW_FILTERS });
+      onApply(defaultFilters);
       return;
     }
 
     const view = views.find((entry) => entry.id === nextId);
     if (view) {
-      onApply(view.filters);
+      onApply(parseFilters(view.filters));
     }
   }
 
+  function resolvedSuggestName(): string {
+    if (selectedView && matchesSelected) {
+      return selectedView.name;
+    }
+    if (suggestName) {
+      return suggestName(filters);
+    }
+    return "Saved view";
+  }
+
   function openSaveModal() {
-    setSaveName(suggestedViewName(filters, selectedView, matchesSelected));
+    setSaveName(resolvedSuggestName());
     setSaveModalError(null);
     onError(null);
     setSaveOpen(true);
@@ -183,9 +192,9 @@ export function SavedViewsControls({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          page: REORDER_ACTION_VIEW_PAGE,
+          page,
           name,
-          filters,
+          filters: filters as Record<string, unknown>,
           isDefault: false,
         }),
       });
@@ -218,7 +227,7 @@ export function SavedViewsControls({
       const response = await fetch(`/api/saved-views/${selectedView.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filters }),
+        body: JSON.stringify({ filters: filters as Record<string, unknown> }),
       });
       const payload = (await response.json()) as {
         view?: SavedViewRecord;
@@ -315,11 +324,11 @@ export function SavedViewsControls({
   return (
     <>
       <div className="inline-flex flex-wrap items-center gap-1.5">
-        <label className="sr-only" htmlFor="saved-view-select">
+        <label className="sr-only" htmlFor={`saved-view-select-${page}`}>
           Saved view
         </label>
         <select
-          id="saved-view-select"
+          id={`saved-view-select-${page}`}
           value={selectedId}
           disabled={disabled}
           onChange={(event) => {
@@ -365,7 +374,7 @@ export function SavedViewsControls({
             onClick={() => {
               void handleSetDefault();
             }}
-            title="Apply this view automatically when you open Reorder Action"
+            title={defaultHint}
           >
             Set default
           </button>

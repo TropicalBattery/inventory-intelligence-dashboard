@@ -11,6 +11,14 @@ import { AiSummaryPanel } from "@/components/reorder/ai-summary-panel";
 import { CoverBadge } from "@/components/reorder/months-of-cover-display";
 import { ReorderExpandedPanel } from "@/components/reorder/reorder-expanded-panel";
 import { SavedViewsControls } from "@/components/reorder/saved-views-controls";
+import {
+  ListingToolbar,
+  listingControlClassName,
+  listingExportButtonClassName,
+  listingLabelClassName,
+  listingSearchInputClassName,
+} from "@/components/shared/listing-toolbar";
+import { MultiSelectFilter } from "@/components/shared/multi-select-filter";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import {
@@ -54,6 +62,8 @@ import {
 } from "@/lib/reorder/export";
 import {
   DEFAULT_REORDER_ACTION_VIEW_FILTERS,
+  parseReorderActionViewFilters,
+  reorderActionViewFiltersEqual,
   type AbcClassFilter,
   type ReorderActionViewFilters,
   type SortDirection,
@@ -71,6 +81,19 @@ import {
   resolveSupplierDisplayName,
   type SupplierFilterOption,
 } from "@/lib/queries/suppliers";
+
+const STATUS_FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: "critical", label: "Critical" },
+  { value: "watch", label: "Watch" },
+  { value: "reorder_needed", label: "Reorder Needed" },
+  { value: "ok", label: "OK (well stocked)" },
+];
+
+const ABC_CLASS_FILTER_OPTIONS: { value: AbcClassFilter; label: string }[] = [
+  { value: "A", label: "A" },
+  { value: "B", label: "B" },
+  { value: "C", label: "C" },
+];
 
 type ReorderActionTabProps = {
   recommendations: ReorderRecommendation[];
@@ -98,9 +121,6 @@ const STATUS_ORDER: Record<ReorderStatus, number> = {
   ok: 3,
   no_demand: 4,
 };
-
-const filterSelectClassName =
-  "h-10 rounded-xl border border-[#E5E7EB] bg-white px-3 text-sm text-[#111111] focus:border-tbc-red focus:outline-none focus:ring-2 focus:ring-tbc-red/20";
 
 const ABC_ROW_BADGE_BASE =
   "inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md text-[10px] font-bold ml-2 align-middle";
@@ -163,26 +183,6 @@ function applyFilterBarSort(option: FilterBarSort): {
       return { sortKey: "quantityAvailable", sortDirection: "asc" };
     case "suggested-qty-desc":
       return { sortKey: "suggestedQtyRounded", sortDirection: "desc" };
-  }
-}
-
-function matchesStatusFilter(
-  status: ReorderStatus,
-  filter: StatusFilter
-): boolean {
-  switch (filter) {
-    case "all":
-      return true;
-    case "actionable":
-      return status === "critical" || status === "watch";
-    case "critical":
-      return status === "critical";
-    case "watch":
-      return status === "watch";
-    case "reorder_needed":
-      return status === "reorder_needed";
-    case "ok":
-      return status === "ok";
   }
 }
 
@@ -303,11 +303,11 @@ export function ReorderActionTab({
   activeInventorySkuCount = null,
   supplierFilterOptions = [],
 }: ReorderActionTabProps) {
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>(
-    DEFAULT_REORDER_ACTION_VIEW_FILTERS.statusFilter
-  );
-  const [abcClassFilter, setAbcClassFilter] = useState<AbcClassFilter>(
-    DEFAULT_REORDER_ACTION_VIEW_FILTERS.abcClassFilter
+  const [statusFilter, setStatusFilter] = useState<StatusFilter[]>(() => [
+    ...DEFAULT_REORDER_ACTION_VIEW_FILTERS.statusFilter,
+  ]);
+  const [abcClassFilter, setAbcClassFilter] = useState<AbcClassFilter[]>(
+    () => [...DEFAULT_REORDER_ACTION_VIEW_FILTERS.abcClassFilter]
   );
   const [showNoDemandItems, setShowNoDemandItems] = useState(
     DEFAULT_REORDER_ACTION_VIEW_FILTERS.showNoDemandItems
@@ -315,9 +315,9 @@ export function ReorderActionTab({
   const [searchQuery, setSearchQuery] = useState(
     DEFAULT_REORDER_ACTION_VIEW_FILTERS.searchQuery
   );
-  const [supplierFilter, setSupplierFilter] = useState(
-    DEFAULT_REORDER_ACTION_VIEW_FILTERS.supplierFilter
-  );
+  const [supplierFilter, setSupplierFilter] = useState<string[]>(() => [
+    ...DEFAULT_REORDER_ACTION_VIEW_FILTERS.supplierFilter,
+  ]);
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [bulkOpenPoConfirmPending, setBulkOpenPoConfirmPending] =
     useState(false);
@@ -363,11 +363,11 @@ export function ReorderActionTab({
   );
 
   const applyViewFilters = useCallback((next: ReorderActionViewFilters) => {
-    setStatusFilter(next.statusFilter);
-    setAbcClassFilter(next.abcClassFilter);
+    setStatusFilter([...next.statusFilter]);
+    setAbcClassFilter([...next.abcClassFilter]);
     setShowNoDemandItems(next.showNoDemandItems);
     setSearchQuery(next.searchQuery);
-    setSupplierFilter(next.supplierFilter);
+    setSupplierFilter([...next.supplierFilter]);
     setSortKey(next.sortKey);
     setSortDirection(next.sortDirection);
   }, []);
@@ -476,20 +476,23 @@ export function ReorderActionTab({
 
   const filteredMainRows = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
+    const statusSet =
+      statusFilter.length > 0 ? new Set<string>(statusFilter) : null;
+    const abcSet =
+      abcClassFilter.length > 0 ? new Set<string>(abcClassFilter) : null;
+    const supplierSet =
+      supplierFilter.length > 0 ? new Set(supplierFilter) : null;
 
     return mainRecommendations.filter((rec) => {
-      if (!matchesStatusFilter(rec.status, statusFilter)) {
+      if (statusSet && !statusSet.has(rec.status)) {
         return false;
       }
 
-      if (abcClassFilter !== "all" && rec.abcClass !== abcClassFilter) {
+      if (abcSet && (rec.abcClass == null || !abcSet.has(rec.abcClass))) {
         return false;
       }
 
-      if (
-        supplierFilter !== "all" &&
-        (rec.supplierExternalId ?? "") !== supplierFilter
-      ) {
+      if (supplierSet && !supplierSet.has(rec.supplierExternalId ?? "")) {
         return false;
       }
 
@@ -511,12 +514,11 @@ export function ReorderActionTab({
 
   const filteredNoDemandRows = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
+    const supplierSet =
+      supplierFilter.length > 0 ? new Set(supplierFilter) : null;
 
     return filterNoDemandRecommendations(recommendations).filter((rec) => {
-      if (
-        supplierFilter !== "all" &&
-        (rec.supplierExternalId ?? "") !== supplierFilter
-      ) {
+      if (supplierSet && !supplierSet.has(rec.supplierExternalId ?? "")) {
         return false;
       }
 
@@ -543,25 +545,24 @@ export function ReorderActionTab({
   const filterDescription = useMemo(() => {
     const parts = [`${sortedMainRows.length} reorderable item(s) in view`];
 
-    if (statusFilter !== "all") {
-      parts.push(`status filter: ${statusFilter}`);
+    if (statusFilter.length > 0) {
+      parts.push(`status filter: ${statusFilter.join(", ")}`);
     }
 
-    if (abcClassFilter !== "all") {
-      parts.push(`ABC class: ${abcClassFilter}`);
+    if (abcClassFilter.length > 0) {
+      parts.push(`ABC class: ${abcClassFilter.join(", ")}`);
     }
 
-    if (supplierFilter !== "all") {
-      const selected = supplierOptions.find(
-        (option) => option.externalId === supplierFilter
-      );
-      parts.push(
-        `supplier: ${
-          selected
-            ? formatSupplierOptionLabel(selected.name, selected.externalId)
-            : supplierFilter
-        }`
-      );
+    if (supplierFilter.length > 0) {
+      const labels = supplierFilter.map((id) => {
+        const selected = supplierOptions.find(
+          (option) => option.externalId === id
+        );
+        return selected
+          ? formatSupplierOptionLabel(selected.name, selected.externalId)
+          : id;
+      });
+      parts.push(`supplier: ${labels.join(", ")}`);
     }
 
     if (searchQuery.trim()) {
@@ -577,6 +578,15 @@ export function ReorderActionTab({
     supplierFilter,
     supplierOptions,
   ]);
+
+  const supplierMultiSelectOptions = useMemo(
+    () =>
+      supplierOptions.map((supplier) => ({
+        value: supplier.externalId,
+        label: formatSupplierOptionLabel(supplier.name, supplier.externalId),
+      })),
+    [supplierOptions]
+  );
 
   const selectedRows = useMemo(
     () => mainRecommendations.filter((rec) => selectedKeys.has(rowKey(rec))),
@@ -802,59 +812,42 @@ export function ReorderActionTab({
       />
 
       <div>
-        <div className="rounded-2xl border border-transparent bg-white p-4 shadow-card">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="min-w-[180px]">
-              <label
-                htmlFor="status-filter"
-                className="mb-1 block text-xs font-medium uppercase tracking-wide text-[#6B7280]"
-              >
-                Status
-              </label>
-              <select
-                id="status-filter"
-                value={statusFilter}
-                onChange={(event) =>
-                  setStatusFilter(event.target.value as StatusFilter)
+        <ListingToolbar
+          filters={
+            <>
+              <MultiSelectFilter
+                label="Status"
+                options={STATUS_FILTER_OPTIONS}
+                selected={statusFilter}
+                onChange={(values) =>
+                  setStatusFilter(values as StatusFilter[])
                 }
-                className={`${filterSelectClassName} w-full min-w-[180px]`}
-              >
-                <option value="actionable">Critical + Watch</option>
-                <option value="all">All</option>
-                <option value="critical">Critical</option>
-                <option value="watch">Watch</option>
-                <option value="reorder_needed">Reorder Needed</option>
-                <option value="ok">OK (well stocked)</option>
-              </select>
-            </div>
-
-            <div className="min-w-[140px]">
-              <label
-                htmlFor="abc-class-filter"
-                className="mb-1 block text-xs font-medium uppercase tracking-wide text-[#6B7280]"
-              >
-                Class
-              </label>
-              <select
-                id="abc-class-filter"
-                value={abcClassFilter}
-                onChange={(event) =>
-                  setAbcClassFilter(event.target.value as AbcClassFilter)
+                placeholder="All statuses"
+                className="min-w-[180px]"
+              />
+              <MultiSelectFilter
+                label="Class"
+                options={ABC_CLASS_FILTER_OPTIONS}
+                selected={abcClassFilter}
+                onChange={(values) =>
+                  setAbcClassFilter(values as AbcClassFilter[])
                 }
-                className={`${filterSelectClassName} w-full min-w-[140px]`}
-              >
-                <option value="all">All</option>
-                <option value="A">A</option>
-                <option value="B">B</option>
-                <option value="C">C</option>
-              </select>
-            </div>
-
-            <div className="min-w-[220px] max-w-md flex-1">
-              <label
-                htmlFor="search-filter"
-                className="mb-1 block text-xs font-medium uppercase tracking-wide text-[#6B7280]"
-              >
+                placeholder="All classes"
+                className="min-w-[140px]"
+              />
+              <MultiSelectFilter
+                label="Supplier"
+                options={supplierMultiSelectOptions}
+                selected={supplierFilter}
+                onChange={setSupplierFilter}
+                placeholder="All suppliers"
+                className="min-w-[180px]"
+              />
+            </>
+          }
+          search={
+            <>
+              <label htmlFor="search-filter" className={listingLabelClassName}>
                 Search
               </label>
               <div className="relative">
@@ -868,16 +861,14 @@ export function ReorderActionTab({
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
                   placeholder="Search SKU or name"
-                  className="h-10 w-full rounded-xl border border-[#E5E7EB] bg-white py-2 pl-9 pr-3 text-sm text-[#111111] focus:border-tbc-red focus:outline-none focus:ring-2 focus:ring-tbc-red/20"
+                  className={listingSearchInputClassName}
                 />
               </div>
-            </div>
-
+            </>
+          }
+          sort={
             <div className="min-w-[180px]">
-              <label
-                htmlFor="sort-filter"
-                className="mb-1 block text-xs font-medium uppercase tracking-wide text-[#6B7280]"
-              >
+              <label htmlFor="sort-filter" className={listingLabelClassName}>
                 Sort
               </label>
               <select
@@ -889,7 +880,7 @@ export function ReorderActionTab({
                   setSortKey(applied.sortKey);
                   setSortDirection(applied.sortDirection);
                 }}
-                className={`${filterSelectClassName} w-full min-w-[180px]`}
+                className={`${listingControlClassName} w-full min-w-[180px]`}
               >
                 <option value="" disabled hidden>
                   Custom
@@ -904,47 +895,31 @@ export function ReorderActionTab({
                 </option>
               </select>
             </div>
-
-            <div className="min-w-[180px]">
-              <label
-                htmlFor="supplier-filter"
-                className="mb-1 block text-xs font-medium uppercase tracking-wide text-[#6B7280]"
-              >
-                Supplier
-              </label>
-              <select
-                id="supplier-filter"
-                value={supplierFilter}
-                onChange={(event) => setSupplierFilter(event.target.value)}
-                className={`${filterSelectClassName} w-full min-w-[180px]`}
-              >
-                <option value="all">All suppliers</option>
-                {supplierOptions.map((supplier) => (
-                  <option key={supplier.externalId} value={supplier.externalId}>
-                    {formatSupplierOptionLabel(
-                      supplier.name,
-                      supplier.externalId
-                    )}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-            <p
-              className="text-xs text-[#9CA3AF]"
-              title="Sourced from the buyer's Order Tool item master"
-            >
-              {activeInventorySkuCount != null && activeInventorySkuCount > 0
-                ? `Showing active inventory only (${activeInventorySkuCount.toLocaleString("en-US")} SKUs)`
-                : "\u00a0"}
-            </p>
-            <div className="flex flex-wrap items-center gap-3">
+          }
+          actions={
+            <>
               <SavedViewsControls
+                page="reorder_action"
                 filters={currentViewFilters}
+                defaultFilters={DEFAULT_REORDER_ACTION_VIEW_FILTERS}
                 onApply={applyViewFilters}
                 onError={setActionError}
+                parseFilters={parseReorderActionViewFilters}
+                filtersEqual={reorderActionViewFiltersEqual}
+                suggestName={(f) => {
+                  if (f.supplierFilter.length > 0) {
+                    const statusPart =
+                      f.statusFilter.length > 0
+                        ? f.statusFilter.join("+")
+                        : "all";
+                    return `${statusPart} · ${f.supplierFilter.join("+")}`;
+                  }
+                  if (f.statusFilter.length > 0) {
+                    return `${f.statusFilter.join("+")} view`;
+                  }
+                  return "all statuses view";
+                }}
+                defaultHint="Apply this view automatically when you open Reorder Action"
               />
               <div className="inline-flex items-center gap-1.5">
                 <button
@@ -953,10 +928,10 @@ export function ReorderActionTab({
                     void handleExport("csv");
                   }}
                   disabled={isExporting !== null}
-                  className="rounded-lg border border-[#E5E7EB] bg-white px-2.5 py-1 text-xs font-medium text-[#374151] transition-colors hover:bg-[#F9FAFB] disabled:cursor-not-allowed disabled:opacity-60"
+                  className={listingExportButtonClassName}
                   title="Download the currently filtered rows as CSV for Excel"
                 >
-                  {isExporting === "csv" ? "Exporting…" : "Export Excel"}
+                  {isExporting === "csv" ? "Exporting…" : "Export CSV"}
                 </button>
                 <button
                   type="button"
@@ -964,7 +939,7 @@ export function ReorderActionTab({
                     void handleExport("pdf");
                   }}
                   disabled={isExporting !== null}
-                  className="rounded-lg border border-[#E5E7EB] bg-white px-2.5 py-1 text-xs font-medium text-[#374151] transition-colors hover:bg-[#F9FAFB] disabled:cursor-not-allowed disabled:opacity-60"
+                  className={listingExportButtonClassName}
                   title="Download a PDF pack of the currently filtered rows"
                 >
                   {isExporting === "pdf" ? "Exporting…" : "Export PDF"}
@@ -974,18 +949,27 @@ export function ReorderActionTab({
                 <input
                   type="checkbox"
                   checked={showNoDemandItems}
-                  onChange={(event) => setShowNoDemandItems(event.target.checked)}
+                  onChange={(event) =>
+                    setShowNoDemandItems(event.target.checked)
+                  }
                   className="h-3.5 w-3.5 rounded border-[#E5E7EB] text-tbc-red focus:ring-tbc-red/20"
                 />
                 Include {noDemandCount.toLocaleString("en-JM")} no-demand SKUs
               </label>
-            </div>
-          </div>
-          <p className="mt-2 text-xs text-[#9CA3AF]">
-            Bands scale with each item&apos;s supplier lead time; standard bands
-            apply when no lead time is on file.
-          </p>
-        </div>
+            </>
+          }
+          meta={
+            <p title="Sourced from the buyer's Order Tool item master">
+              {activeInventorySkuCount != null && activeInventorySkuCount > 0
+                ? `Showing active inventory only (${activeInventorySkuCount.toLocaleString("en-US")} SKUs)`
+                : "\u00a0"}
+            </p>
+          }
+        />
+        <p className="mt-2 text-xs text-[#9CA3AF]">
+          Bands scale with each item&apos;s supplier lead time; standard bands
+          apply when no lead time is on file.
+        </p>
 
         {actionError ? (
           <div

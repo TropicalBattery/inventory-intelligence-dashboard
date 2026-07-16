@@ -1,16 +1,16 @@
-import {
-  parseReorderActionViewFilters,
-  REORDER_ACTION_VIEW_PAGE,
-  type ReorderActionViewFilters,
-} from "@/lib/reorder/view-filters";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { TENANT_ID } from "@/lib/tenant";
+import {
+  coerceSavedViewPage,
+  type SavedViewPage,
+} from "@/lib/saved-views/pages";
 
 export type SavedViewRecord = {
   id: string;
-  page: string;
+  page: SavedViewPage;
   name: string;
-  filters: ReorderActionViewFilters;
+  /** Opaque JSON filters; each page parses with its own soft-parser. */
+  filters: Record<string, unknown>;
   isDefault: boolean;
   updatedAt: string;
 };
@@ -24,12 +24,20 @@ type SavedViewRow = {
   updated_at: string;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function coerceFilters(raw: unknown): Record<string, unknown> {
+  return isRecord(raw) ? raw : {};
+}
+
 function mapRow(row: SavedViewRow): SavedViewRecord {
   return {
     id: row.id,
-    page: row.page,
+    page: coerceSavedViewPage(row.page),
     name: row.name,
-    filters: parseReorderActionViewFilters(row.filters),
+    filters: coerceFilters(row.filters),
     isDefault: row.is_default,
     updatedAt: row.updated_at,
   };
@@ -37,7 +45,7 @@ function mapRow(row: SavedViewRow): SavedViewRecord {
 
 export async function listSavedViews(
   email: string,
-  page: string = REORDER_ACTION_VIEW_PAGE
+  page: SavedViewPage
 ): Promise<SavedViewRecord[]> {
   const supabase = createAdminClient();
   const { data, error } = await supabase
@@ -57,9 +65,9 @@ export async function listSavedViews(
 
 export async function createSavedView(input: {
   email: string;
-  page: string;
+  page: SavedViewPage;
   name: string;
-  filters: ReorderActionViewFilters;
+  filters: Record<string, unknown>;
   isDefault: boolean;
 }): Promise<SavedViewRecord> {
   const supabase = createAdminClient();
@@ -97,7 +105,7 @@ export async function updateSavedView(input: {
   email: string;
   id: string;
   name?: string;
-  filters?: ReorderActionViewFilters;
+  filters?: Record<string, unknown>;
   isDefault?: boolean;
 }): Promise<SavedViewRecord> {
   const supabase = createAdminClient();
@@ -121,7 +129,7 @@ export async function updateSavedView(input: {
   const row = existing as SavedViewRow;
 
   if (input.isDefault === true) {
-    await clearDefaultViews(input.email, row.page);
+    await clearDefaultViews(input.email, coerceSavedViewPage(row.page));
   }
 
   const patch: Record<string, unknown> = {
@@ -178,7 +186,10 @@ export async function deleteSavedView(
   }
 }
 
-async function clearDefaultViews(email: string, page: string): Promise<void> {
+async function clearDefaultViews(
+  email: string,
+  page: SavedViewPage
+): Promise<void> {
   const supabase = createAdminClient();
   const { error } = await supabase
     .from("user_saved_views")

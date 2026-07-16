@@ -1,17 +1,11 @@
 import { requireUserEmail } from "@/lib/po/cart-auth";
-import {
-  normalizeViewName,
-  parseReorderActionViewFilters,
-  REORDER_ACTION_VIEW_PAGE,
-} from "@/lib/reorder/view-filters";
+import { normalizeViewName } from "@/lib/reorder/view-filters";
+import { coerceSavedViewPage } from "@/lib/saved-views/pages";
 import { createSavedView, listSavedViews } from "@/lib/saved-views/store";
 import { NextResponse } from "next/server";
 
-function coercePage(value: unknown): string {
-  if (typeof value !== "string" || !value.trim()) {
-    return REORDER_ACTION_VIEW_PAGE;
-  }
-  return value.trim();
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export async function GET(request: Request) {
@@ -22,7 +16,7 @@ export async function GET(request: Request) {
     }
 
     const { searchParams } = new URL(request.url);
-    const page = coercePage(searchParams.get("page"));
+    const page = coerceSavedViewPage(searchParams.get("page"));
     const views = await listSavedViews(auth.email, page);
 
     return NextResponse.json({ views });
@@ -53,8 +47,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const page = coercePage(body.page);
-    const filters = parseReorderActionViewFilters(body.filters);
+    const page = coerceSavedViewPage(body.page);
+    const filters = isRecord(body.filters) ? body.filters : {};
     const isDefault = body.isDefault === true;
 
     const view = await createSavedView({

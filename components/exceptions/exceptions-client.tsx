@@ -1,15 +1,28 @@
 "use client";
 
+import { Search } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
+import {
+  ListingToolbar,
+  listingControlClassName,
+  listingExportButtonClassName,
+  listingLabelClassName,
+  listingSearchInputClassName,
+} from "@/components/shared/listing-toolbar";
 import {
   EXCEPTION_LABELS,
   type ExceptionType,
   type SkuExceptionGroup,
 } from "@/lib/exceptions/detect";
 import { formatNumber } from "@/lib/format";
+import {
+  buildDatedExportFilename,
+  exportRowsToCsv,
+  type ExportColumnDef,
+} from "@/lib/listing/export";
 
 const PAGE_SIZE = 25;
 
@@ -18,6 +31,22 @@ const TYPE_ORDER: ExceptionType[] = [
   "missing_supplier_data",
   "stale_demand",
   "conflicting_rules",
+];
+
+type ExceptionsSortKey = "severity" | "sku";
+
+type ExceptionExportRow = {
+  sku: string;
+  name: string;
+  exceptionTypes: string;
+  detail: string;
+};
+
+const EXCEPTION_EXPORT_COLUMNS: ExportColumnDef<ExceptionExportRow>[] = [
+  { key: "sku", header: "SKU" },
+  { key: "name", header: "Name" },
+  { key: "exceptionTypes", header: "Exception Types" },
+  { key: "detail", header: "Detail" },
 ];
 
 const PILL_STYLES: Record<
@@ -79,10 +108,40 @@ function actionForTypes(types: ExceptionType[]): ReactNode {
   return <span className="text-sm text-[#9CA3AF]">-</span>;
 }
 
+function mostSevereTypeIndex(group: SkuExceptionGroup): number {
+  let best = TYPE_ORDER.length;
+  for (const exception of group.exceptions) {
+    const index = TYPE_ORDER.indexOf(exception.type);
+    if (index !== -1 && index < best) {
+      best = index;
+    }
+  }
+  return best;
+}
+
+function compareSku(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { sensitivity: "base" });
+}
+
+function buildExceptionExportRows(
+  groups: SkuExceptionGroup[]
+): ExceptionExportRow[] {
+  return groups.map((group) => ({
+    sku: group.sku,
+    name: group.name?.trim() || "-",
+    exceptionTypes: group.exceptions
+      .map((exception) => EXCEPTION_LABELS[exception.type])
+      .join("; "),
+    detail: group.exceptions.map((exception) => exception.detail).join("; "),
+  }));
+}
+
 export function ExceptionsClient({ groups }: ExceptionsClientProps) {
   const [activeTypes, setActiveTypes] = useState<Set<ExceptionType>>(
     () => new Set()
   );
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortKey, setSortKey] = useState<ExceptionsSortKey>("severity");
   const [page, setPage] = useState(1);
 
   const typeCounts = useMemo(() => {
@@ -93,18 +152,43 @@ export function ExceptionsClient({ groups }: ExceptionsClientProps) {
     return counts;
   }, [groups]);
 
-  const filtered = useMemo(() => {
-    if (activeTypes.size === 0) {
-      return groups;
-    }
-    return groups.filter((group) =>
-      group.exceptions.some((exception) => activeTypes.has(exception.type))
-    );
-  }, [groups, activeTypes]);
+  const filteredSorted = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+    let next = groups;
+
+    if (activeTypes.size > 0) {
+      next = next.filter((group) =>
+        group.exceptions.some((exception) => activeTypes.has(exception.type))
+      );
+    }
+
+    if (query.length > 0) {
+      next = next.filter((group) => {
+        const sku = group.sku.toLowerCase();
+        const name = (group.name ?? "").toLowerCase();
+        return sku.includes(query) || name.includes(query);
+      });
+    }
+
+    const sorted = [...next];
+    sorted.sort((a, b) => {
+      if (sortKey === "severity") {
+        const severityDiff =
+          mostSevereTypeIndex(a) - mostSevereTypeIndex(b);
+        if (severityDiff !== 0) {
+          return severityDiff;
+        }
+      }
+      return compareSku(a.sku, b.sku);
+    });
+
+    return sorted;
+  }, [groups, activeTypes, searchQuery, sortKey]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredSorted.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
-  const pageRows = filtered.slice(
+  const pageRows = filteredSorted.slice(
     (safePage - 1) * PAGE_SIZE,
     safePage * PAGE_SIZE
   );
@@ -120,6 +204,15 @@ export function ExceptionsClient({ groups }: ExceptionsClientProps) {
       return next;
     });
     setPage(1);
+  }
+
+  function handleExportCsv() {
+    const filename = buildDatedExportFilename("exceptions", "csv");
+    exportRowsToCsv(
+      EXCEPTION_EXPORT_COLUMNS,
+      buildExceptionExportRows(filteredSorted),
+      filename
+    );
   }
 
   return (
@@ -144,8 +237,65 @@ export function ExceptionsClient({ groups }: ExceptionsClientProps) {
         })}
       </div>
 
+      <ListingToolbar
+        search={
+          <>
+            <label htmlFor="exceptions-search" className={listingLabelClassName}>
+              Search
+            </label>
+            <div className="relative">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                aria-hidden="true"
+              />
+              <input
+                id="exceptions-search"
+                type="search"
+                value={searchQuery}
+                onChange={(event) => {
+                  setSearchQuery(event.target.value);
+                  setPage(1);
+                }}
+                placeholder="Search SKU or name"
+                className={listingSearchInputClassName}
+              />
+            </div>
+          </>
+        }
+        sort={
+          <div className="min-w-[180px]">
+            <label htmlFor="exceptions-sort" className={listingLabelClassName}>
+              Sort
+            </label>
+            <select
+              id="exceptions-sort"
+              value={sortKey}
+              onChange={(event) => {
+                setSortKey(event.target.value as ExceptionsSortKey);
+                setPage(1);
+              }}
+              className={`${listingControlClassName} w-full min-w-[180px]`}
+            >
+              <option value="severity">Severity</option>
+              <option value="sku">SKU</option>
+            </select>
+          </div>
+        }
+        actions={
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            disabled={filteredSorted.length === 0}
+            className={listingExportButtonClassName}
+            title="Download the currently filtered rows as CSV"
+          >
+            Export CSV
+          </button>
+        }
+      />
+
       <Card className="w-full overflow-visible rounded-2xl p-0">
-        {filtered.length === 0 ? (
+        {filteredSorted.length === 0 ? (
           <div className="px-6 py-12 text-center text-sm text-[#6B7280]">
             {groups.length === 0
               ? "All clear — no data exceptions detected."
@@ -215,9 +365,9 @@ export function ExceptionsClient({ groups }: ExceptionsClientProps) {
                 Showing{" "}
                 {formatNumber((safePage - 1) * PAGE_SIZE + 1)}-
                 {formatNumber(
-                  Math.min(safePage * PAGE_SIZE, filtered.length)
+                  Math.min(safePage * PAGE_SIZE, filteredSorted.length)
                 )}{" "}
-                of {formatNumber(filtered.length)}
+                of {formatNumber(filteredSorted.length)}
               </p>
               <div className="flex gap-2">
                 <button

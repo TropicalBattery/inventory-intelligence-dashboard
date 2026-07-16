@@ -26,11 +26,11 @@ describe("parseReorderActionViewFilters", () => {
     });
 
     expect(parsed).toEqual({
-      statusFilter: "critical",
-      abcClassFilter: "A",
+      statusFilter: ["critical"],
+      abcClassFilter: ["A"],
       showNoDemandItems: true,
       searchQuery: "hankook",
-      supplierFilter: "FK020",
+      supplierFilter: ["FK020"],
       sortKey: "sku",
       sortDirection: "desc",
     });
@@ -40,13 +40,41 @@ describe("parseReorderActionViewFilters", () => {
       sortKey: 12,
       supplierFilter: "  ",
     });
-    expect(soft.statusFilter).toBe(
+    expect(soft.statusFilter).toEqual(
       DEFAULT_REORDER_ACTION_VIEW_FILTERS.statusFilter
     );
     expect(soft.sortKey).toBe(DEFAULT_REORDER_ACTION_VIEW_FILTERS.sortKey);
-    expect(soft.supplierFilter).toBe(
+    expect(soft.supplierFilter).toEqual(
       DEFAULT_REORDER_ACTION_VIEW_FILTERS.supplierFilter
     );
+  });
+
+  it("migrates legacy single-select aliases and accepts arrays", () => {
+    expect(
+      parseReorderActionViewFilters({
+        statusFilter: "actionable",
+        abcClassFilter: "all",
+        supplierFilter: "all",
+      })
+    ).toEqual({
+      ...DEFAULT_REORDER_ACTION_VIEW_FILTERS,
+      statusFilter: ["critical", "watch"],
+      abcClassFilter: [],
+      supplierFilter: [],
+    });
+
+    expect(
+      parseReorderActionViewFilters({
+        statusFilter: ["critical", "ok", "bogus"],
+        abcClassFilter: ["B", "C", "Z"],
+        supplierFilter: [" FK020 ", "", "ACME"],
+      })
+    ).toEqual({
+      ...DEFAULT_REORDER_ACTION_VIEW_FILTERS,
+      statusFilter: ["critical", "ok"],
+      abcClassFilter: ["B", "C"],
+      supplierFilter: ["FK020", "ACME"],
+    });
   });
 });
 
@@ -61,9 +89,21 @@ describe("reorderActionViewFiltersEqual", () => {
     expect(
       reorderActionViewFiltersEqual(DEFAULT_REORDER_ACTION_VIEW_FILTERS, {
         ...DEFAULT_REORDER_ACTION_VIEW_FILTERS,
-        statusFilter: "critical",
+        statusFilter: ["critical"],
       })
     ).toBe(false);
+    expect(
+      reorderActionViewFiltersEqual(
+        {
+          ...DEFAULT_REORDER_ACTION_VIEW_FILTERS,
+          statusFilter: ["watch", "critical"],
+        },
+        {
+          ...DEFAULT_REORDER_ACTION_VIEW_FILTERS,
+          statusFilter: ["critical", "watch"],
+        }
+      )
+    ).toBe(true);
   });
 });
 

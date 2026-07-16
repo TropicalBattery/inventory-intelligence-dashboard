@@ -2,9 +2,17 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Package, Search } from "lucide-react";
+import { SavedViewsControls } from "@/components/reorder/saved-views-controls";
 import { DataFreshnessBadge } from "@/components/shared/data-freshness-badge";
+import {
+  ListingToolbar,
+  listingExportButtonClassName,
+  listingLabelClassName,
+  listingSearchInputClassName,
+} from "@/components/shared/listing-toolbar";
+import { MultiSelectFilter } from "@/components/shared/multi-select-filter";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -17,6 +25,18 @@ import {
   TableRow,
 } from "@/components/ui/Table";
 import { formatNumber } from "@/lib/format";
+import {
+  DEFAULT_INVENTORY_VIEW_FILTERS,
+  inventoryViewFiltersEqual,
+  parseInventoryViewFilters,
+  type InventoryStatusFilter,
+  type InventoryViewFilters,
+} from "@/lib/inventory/view-filters";
+import {
+  buildDatedExportFilename,
+  exportRowsToCsv,
+  type ExportColumnDef,
+} from "@/lib/listing/export";
 import {
   summarizeInventoryStats,
   type InventoryItem,
@@ -38,18 +58,39 @@ type InventoryTableProps = {
   lastInventorySyncAt: string | null;
 };
 
-type StatusFilter =
-  | "all"
-  | "critical"
-  | "watch"
-  | "reorder_needed"
-  | "ok"
-  | "no_demand"
-  | "reorder"
-  | "inactive";
+type InventoryExportRow = {
+  sku: string;
+  productName: string;
+  itemClass: string;
+  category: string;
+  qtyAvail: string;
+  onHand: string;
+  onOrder: string;
+  reorderLvl: string;
+  status: string;
+};
 
-const filterSelectClassName =
-  "h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 focus:border-tbc-red focus:outline-none focus:ring-2 focus:ring-tbc-red/20";
+const STATUS_FILTER_OPTIONS: {
+  value: InventoryStatusFilter;
+  label: string;
+}[] = [
+  { value: "critical", label: "Critical" },
+  { value: "reorder_needed", label: "Reorder Needed" },
+  { value: "ok", label: "OK" },
+  { value: "no_demand", label: "No Activity" },
+];
+
+const INVENTORY_EXPORT_COLUMNS: ExportColumnDef<InventoryExportRow>[] = [
+  { key: "sku", header: "SKU" },
+  { key: "productName", header: "Product Name" },
+  { key: "itemClass", header: "Item Class" },
+  { key: "category", header: "Category" },
+  { key: "qtyAvail", header: "Qty Avail", align: "right" },
+  { key: "onHand", header: "On Hand", align: "right" },
+  { key: "onOrder", header: "On Order", align: "right" },
+  { key: "reorderLvl", header: "Reorder Lvl", align: "right" },
+  { key: "status", header: "Status" },
+];
 
 const STATUS_ORDER: Record<ReorderStatus, number> = {
   critical: 0,
@@ -70,21 +111,24 @@ const STICKY_TH_CLASS =
 
 function matchesStatusFilter(
   status: ReorderStatus,
-  filter: StatusFilter
+  filter: InventoryStatusFilter[]
 ): boolean {
-  if (filter === "all") {
+  if (filter.length === 0) {
     return true;
   }
 
-  if (filter === "reorder") {
-    return status === "reorder_needed";
+  return filter.includes(status);
+}
+
+function matchesClassFilter(
+  itemClass: string | null,
+  filter: string[]
+): boolean {
+  if (filter.length === 0) {
+    return true;
   }
 
-  if (filter === "inactive") {
-    return status === "no_demand";
-  }
-
-  return status === filter;
+  return itemClass != null && filter.includes(itemClass);
 }
 
 function inventoryPageHref(page: number, showInactive: boolean): string {
@@ -100,6 +144,52 @@ function inventoryPageHref(page: number, showInactive: boolean): string {
 
   const queryString = params.toString();
   return queryString ? `/inventory?${queryString}` : "/inventory";
+}
+
+function buildInventoryExportRows(
+  rows: InventoryItem[]
+): InventoryExportRow[] {
+  return rows.map((item) => {
+    const { recommendation } = item;
+
+    return {
+      sku: recommendation.sku,
+      productName: recommendation.name?.trim() || "-",
+      itemClass: recommendation.itemClass?.trim() || "-",
+      category: recommendation.category?.trim() || "-",
+      qtyAvail: formatNumber(recommendation.quantityAvailable),
+      onHand: formatNumber(recommendation.quantityOnHand),
+      onOrder: formatNumber(recommendation.quantityOnOrder),
+      reorderLvl:
+        recommendation.reorderLevel !== null
+          ? formatNumber(recommendation.reorderLevel)
+          : "-",
+      status: getStatusLabel(recommendation.status),
+    };
+  });
+}
+
+function suggestInventoryViewName(filters: InventoryViewFilters): string {
+  const parts: string[] = [];
+
+  if (filters.statusFilter.length > 0) {
+    parts.push(filters.statusFilter.join("+"));
+  }
+  if (filters.classFilter.length > 0) {
+    parts.push(filters.classFilter.join("+"));
+  }
+  if (filters.showInactive) {
+    parts.push("incl inactive");
+  }
+  if (filters.searchQuery.trim()) {
+    parts.push(`“${filters.searchQuery.trim()}”`);
+  }
+
+  if (parts.length === 0) {
+    return "All inventory";
+  }
+
+  return `${parts.join(" · ")} view`;
 }
 
 function ClassCategoryCell({
@@ -141,9 +231,15 @@ export function InventoryTable({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [classFilter, setClassFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<InventoryStatusFilter[]>(
+    () => [...DEFAULT_INVENTORY_VIEW_FILTERS.statusFilter]
+  );
+  const [classFilter, setClassFilter] = useState<string[]>(() => [
+    ...DEFAULT_INVENTORY_VIEW_FILTERS.classFilter,
+  ]);
   const [expandedSku, setExpandedSku] = useState<string | null>(null);
+  const [viewsError, setViewsError] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   function handleInactiveToggle(checked: boolean) {
     const params = new URLSearchParams(searchParams.toString());
@@ -168,6 +264,49 @@ export function InventoryTable({
     router.replace(queryString ? `/inventory?${queryString}` : "/inventory");
   }
 
+  const applyViewFilters = useCallback(
+    (next: InventoryViewFilters) => {
+      setSearchQuery(next.searchQuery);
+      setStatusFilter([...next.statusFilter]);
+      setClassFilter([...next.classFilter]);
+      setViewsError(null);
+
+      if (next.showInactive !== showInactive) {
+        const params = new URLSearchParams(searchParams.toString());
+
+        if (next.showInactive) {
+          params.set("inactive", "true");
+        } else {
+          params.delete("inactive");
+        }
+
+        params.set("page", "1");
+        router.push(`/inventory?${params.toString()}`);
+        return;
+      }
+
+      if (page > 1) {
+        const params = new URLSearchParams(searchParams.toString());
+        params.delete("page");
+        const queryString = params.toString();
+        router.replace(
+          queryString ? `/inventory?${queryString}` : "/inventory"
+        );
+      }
+    },
+    [page, router, searchParams, showInactive]
+  );
+
+  const currentFilters = useMemo(
+    (): InventoryViewFilters => ({
+      statusFilter,
+      classFilter,
+      searchQuery,
+      showInactive,
+    }),
+    [statusFilter, classFilter, searchQuery, showInactive]
+  );
+
   const classOptions = useMemo(() => {
     const values = new Set<string>();
 
@@ -179,6 +318,11 @@ export function InventoryTable({
 
     return Array.from(values).sort((left, right) => left.localeCompare(right));
   }, [items]);
+
+  const classMultiSelectOptions = useMemo(
+    () => classOptions.map((option) => ({ value: option, label: option })),
+    [classOptions]
+  );
 
   const hasSearchQuery = searchQuery.trim().length > 0;
   const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -195,8 +339,7 @@ export function InventoryTable({
       }
 
       if (
-        classFilter !== "all" &&
-        item.recommendation.itemClass !== classFilter
+        !matchesClassFilter(item.recommendation.itemClass, classFilter)
       ) {
         return false;
       }
@@ -223,7 +366,7 @@ export function InventoryTable({
         return false;
       }
 
-      if (classFilter !== "all" && recommendation.itemClass !== classFilter) {
+      if (!matchesClassFilter(recommendation.itemClass, classFilter)) {
         return false;
       }
 
@@ -291,9 +434,25 @@ export function InventoryTable({
 
   function clearFilters() {
     setSearchQuery("");
-    setStatusFilter("all");
-    setClassFilter("all");
+    setStatusFilter([]);
+    setClassFilter([]);
     resetToFirstPage();
+  }
+
+  function handleExportCsv() {
+    setIsExporting(true);
+    setViewsError(null);
+    try {
+      const exportRows = buildInventoryExportRows(filteredRows);
+      const filename = buildDatedExportFilename("inventory", "csv");
+      exportRowsToCsv(INVENTORY_EXPORT_COLUMNS, exportRows, filename);
+    } catch (error) {
+      setViewsError(
+        error instanceof Error ? error.message : "Failed to export CSV"
+      );
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   if (items.length === 0) {
@@ -327,108 +486,116 @@ export function InventoryTable({
         <DataFreshnessBadge lastSyncAt={lastInventorySyncAt} />
       </div>
 
-      <div className="flex flex-wrap items-end gap-4 rounded-2xl border border-transparent bg-white p-4 shadow-card">
-        <div className="min-w-[220px] flex-1">
-          <label
-            htmlFor="inventory-search"
-            className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500"
-          >
-            Search
-          </label>
-          <div className="relative">
-            <Search
-              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-              aria-hidden="true"
-            />
-            <input
-              id="inventory-search"
-              type="search"
-              value={searchQuery}
-              onChange={(event) => {
-                setSearchQuery(event.target.value);
+      <ListingToolbar
+        filters={
+          <>
+            <MultiSelectFilter
+              label="Status"
+              options={STATUS_FILTER_OPTIONS}
+              selected={statusFilter}
+              onChange={(values) => {
+                setStatusFilter(values as InventoryStatusFilter[]);
                 if (page > 1) {
                   resetToFirstPage();
                 }
               }}
-              placeholder="Search SKU or name"
-              className="h-10 w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-slate-900 focus:border-tbc-red focus:outline-none focus:ring-2 focus:ring-tbc-red/20"
+              placeholder="All statuses"
+              className="min-w-[180px]"
             />
-          </div>
-        </div>
-
-        <div className="min-w-[180px]">
-          <label
-            htmlFor="inventory-status-filter"
-            className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500"
-          >
-            Status
-          </label>
-          <select
-            id="inventory-status-filter"
-            value={statusFilter}
-            onChange={(event) => {
-              setStatusFilter(event.target.value as StatusFilter);
-              if (page > 1) {
-                resetToFirstPage();
-              }
-            }}
-            className={`${filterSelectClassName} w-full min-w-[180px]`}
-          >
-            <option value="all">All</option>
-            <option value="critical">Critical</option>
-            <option value="reorder">Reorder Needed</option>
-            <option value="ok">OK</option>
-            <option value="inactive">No Activity</option>
-          </select>
-        </div>
-
-        <div className="min-w-[180px]">
-          <label
-            htmlFor="inventory-class-filter"
-            className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500"
-          >
-            Class / Category
-          </label>
-          <select
-            id="inventory-class-filter"
-            value={classFilter}
-            onChange={(event) => {
-              setClassFilter(event.target.value);
-              if (page > 1) {
-                resetToFirstPage();
-              }
-            }}
-            className={`${filterSelectClassName} w-full min-w-[180px]`}
-          >
-            <option value="all">All classes</option>
-            {classOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="min-w-[220px]">
-          <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
-            Inactive items
-          </label>
-          <label className="flex h-10 items-center gap-2 rounded-2xl border border-transparent bg-white px-3 text-sm text-slate-700 shadow-card">
-            <input
-              type="checkbox"
-              checked={showInactive}
-              onChange={(event) => handleInactiveToggle(event.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-tbc-red focus:ring-tbc-red/20"
+            <MultiSelectFilter
+              label="Class / Category"
+              options={classMultiSelectOptions}
+              selected={classFilter}
+              onChange={(values) => {
+                setClassFilter(values);
+                if (page > 1) {
+                  resetToFirstPage();
+                }
+              }}
+              placeholder="All classes"
+              className="min-w-[180px]"
             />
-            Show inactive items
-            {!showInactive && inactiveHiddenCount > 0 ? (
-              <span className="text-xs text-slate-500">
-                ({formatNumber(inactiveHiddenCount)})
-              </span>
-            ) : null}
-          </label>
+            <div className="min-w-[200px]">
+              <span className={listingLabelClassName}>Inactive items</span>
+              <label className="flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-[#E5E7EB] bg-white px-3 text-sm text-[#374151]">
+                <input
+                  type="checkbox"
+                  checked={showInactive}
+                  onChange={(event) =>
+                    handleInactiveToggle(event.target.checked)
+                  }
+                  className="h-3.5 w-3.5 rounded border-[#E5E7EB] text-tbc-red focus:ring-tbc-red/20"
+                />
+                Show inactive items
+                {!showInactive && inactiveHiddenCount > 0 ? (
+                  <span className="text-xs text-[#9CA3AF]">
+                    ({formatNumber(inactiveHiddenCount)})
+                  </span>
+                ) : null}
+              </label>
+            </div>
+          </>
+        }
+        search={
+          <>
+            <label htmlFor="inventory-search" className={listingLabelClassName}>
+              Search
+            </label>
+            <div className="relative">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                aria-hidden="true"
+              />
+              <input
+                id="inventory-search"
+                type="search"
+                value={searchQuery}
+                onChange={(event) => {
+                  setSearchQuery(event.target.value);
+                  if (page > 1) {
+                    resetToFirstPage();
+                  }
+                }}
+                placeholder="Search SKU or name"
+                className={listingSearchInputClassName}
+              />
+            </div>
+          </>
+        }
+        actions={
+          <>
+            <SavedViewsControls
+              page="inventory"
+              filters={currentFilters}
+              defaultFilters={DEFAULT_INVENTORY_VIEW_FILTERS}
+              onApply={applyViewFilters}
+              onError={setViewsError}
+              parseFilters={parseInventoryViewFilters}
+              filtersEqual={inventoryViewFiltersEqual}
+              suggestName={suggestInventoryViewName}
+              defaultHint="Apply this view automatically when you open Inventory"
+            />
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              disabled={isExporting}
+              className={listingExportButtonClassName}
+              title="Download the currently filtered rows as CSV"
+            >
+              {isExporting ? "Exporting…" : "Export CSV"}
+            </button>
+          </>
+        }
+      />
+
+      {viewsError ? (
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          {viewsError}
         </div>
-      </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-transparent bg-white px-4 py-3 text-sm text-slate-600 shadow-card">
         <span>

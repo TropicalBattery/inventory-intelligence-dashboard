@@ -1,14 +1,15 @@
 import { requireUserEmail } from "@/lib/po/cart-auth";
-import {
-  normalizeViewName,
-  parseReorderActionViewFilters,
-} from "@/lib/reorder/view-filters";
+import { normalizeViewName } from "@/lib/reorder/view-filters";
 import { deleteSavedView, updateSavedView } from "@/lib/saved-views/store";
 import { NextResponse } from "next/server";
 
 type RouteContext = {
   params: { id: string };
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 export async function PATCH(request: Request, context: RouteContext) {
   try {
@@ -25,7 +26,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     const body = (await request.json()) as Record<string, unknown>;
     const patch: {
       name?: string;
-      filters?: ReturnType<typeof parseReorderActionViewFilters>;
+      filters?: Record<string, unknown>;
       isDefault?: boolean;
     } = {};
 
@@ -43,7 +44,13 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
 
     if (body.filters !== undefined) {
-      patch.filters = parseReorderActionViewFilters(body.filters);
+      if (!isRecord(body.filters)) {
+        return NextResponse.json(
+          { error: "filters must be an object" },
+          { status: 400 }
+        );
+      }
+      patch.filters = body.filters;
     }
 
     if (body.isDefault !== undefined) {
