@@ -212,6 +212,30 @@ function InboundFlagIcon({
   );
 }
 
+/** Purple calendar — seasonal demand peak. Shared by product-name cells + legend. */
+function SeasonalFlagIcon({
+  title,
+  className,
+}: {
+  title?: string;
+  className?: string;
+}) {
+  return (
+    <i
+      className={[
+        FLAG_ICON_CLASS,
+        "ti-calendar-stats text-[#6D28D9]",
+        className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      title={title}
+      aria-label={title ?? "Seasonal peak"}
+      aria-hidden={title ? undefined : true}
+    />
+  );
+}
+
 function FlagsLegend() {
   return (
     <span className="inline-flex flex-wrap items-center gap-3 text-[11px] text-[#6B7280]">
@@ -223,6 +247,10 @@ function FlagsLegend() {
       <span className="inline-flex items-center gap-1">
         <InboundFlagIcon />
         Container inbound
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <SeasonalFlagIcon />
+        Seasonal peak
       </span>
     </span>
   );
@@ -1324,10 +1352,9 @@ export function ReorderActionTab({
                         <span className="inline-flex max-w-full items-center gap-1.5">
                           <span className="truncate">{rec.name ?? "-"}</span>
                           {rec.seasonality?.isSeasonal ? (
-                            <i
-                              className="ti ti-calendar-stats shrink-0 text-sm text-[#6D28D9]"
+                            <SeasonalFlagIcon
+                              className="shrink-0 text-sm"
                               title={`Seasonal: peak ${rec.seasonality.peakLabel ?? ""}`}
-                              aria-label={`Seasonal: peak ${rec.seasonality.peakLabel ?? ""}`}
                             />
                           ) : null}
                         </span>
@@ -1495,10 +1522,9 @@ export function ReorderActionTab({
                           <span className="inline-flex max-w-full items-center gap-1.5">
                             <span className="truncate">{rec.name ?? "-"}</span>
                             {rec.seasonality?.isSeasonal ? (
-                              <i
-                                className="ti ti-calendar-stats shrink-0 text-sm text-[#6D28D9]"
+                              <SeasonalFlagIcon
+                                className="shrink-0 text-sm"
                                 title={`Seasonal: peak ${rec.seasonality.peakLabel ?? ""}`}
-                                aria-label={`Seasonal: peak ${rec.seasonality.peakLabel ?? ""}`}
                               />
                             ) : null}
                           </span>
