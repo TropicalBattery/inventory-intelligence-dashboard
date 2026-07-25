@@ -13,6 +13,7 @@ import {
   listingSearchInputClassName,
 } from "@/components/shared/listing-toolbar";
 import { MultiSelectFilter } from "@/components/shared/multi-select-filter";
+import { UomCell } from "@/components/shared/uom-cell";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -25,6 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/Table";
 import { formatNumber } from "@/lib/format";
+import { parseUom } from "@/lib/format/uom";
 import {
   DEFAULT_INVENTORY_VIEW_FILTERS,
   inventoryViewFiltersEqual,
@@ -100,7 +102,12 @@ const STATUS_ORDER: Record<ReorderStatus, number> = {
   no_demand: 4,
 };
 
-const COLUMN_COUNT = 8;
+const COLUMN_COUNT = 9;
+
+/** Hidden below lg — same tier as other lower-priority inventory columns. */
+const UOM_COLUMN_CLASS =
+  "hidden w-16 px-2 text-left text-xs align-top lg:table-cell";
+const UOM_COL_CLASS = "hidden w-16 lg:table-column";
 
 /**
  * Sticky under the app TopBar (py-4 + title + optional subtitle + border ≈ 5.125rem).
@@ -657,6 +664,7 @@ export function InventoryTable({
               <colgroup>
                 <col className="w-32" />
                 <col />
+                <col className={UOM_COL_CLASS} />
                 <col className="w-40" />
                 <col className="w-24" />
                 <col className="w-24" />
@@ -671,6 +679,11 @@ export function InventoryTable({
                   </TableHead>
                   <TableHead className={`${STICKY_TH_CLASS} px-3`}>
                     Product Name
+                  </TableHead>
+                  <TableHead
+                    className={`${STICKY_TH_CLASS} ${UOM_COLUMN_CLASS}`}
+                  >
+                    UOM
                   </TableHead>
                   <TableHead className={`${STICKY_TH_CLASS} px-3`}>
                     Class / Category
@@ -739,6 +752,11 @@ export function InventoryTable({
                           <span className="block truncate text-sm text-slate-800">
                             {recommendation.name ?? "-"}
                           </span>
+                        </TableCell>
+                        <TableCell className={UOM_COLUMN_CLASS}>
+                          <UomCell
+                            pack={parseUom(recommendation.unitOfMeasure)}
+                          />
                         </TableCell>
                         <TableCell className="min-w-0 px-3 align-top">
                           <ClassCategoryCell

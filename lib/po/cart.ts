@@ -27,13 +27,17 @@ function toNumber(value: number | string | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export function mapCartRow(row: PoCartItemRow): PoCartItem {
+export function mapCartRow(
+  row: PoCartItemRow,
+  unitOfMeasure: string | null = null
+): PoCartItem {
   return {
     id: row.id,
     tenantId: row.tenant_id,
     createdBy: row.created_by,
     sku: row.sku,
     productName: row.product_name,
+    unitOfMeasure,
     quantity: toNumber(row.quantity) ?? 0,
     supplierExternalId: row.supplier_external_id,
     unitPrice: toNumber(row.unit_price),
@@ -42,6 +46,44 @@ export function mapCartRow(row: PoCartItemRow): PoCartItem {
     addedAt: row.added_at,
     updatedAt: row.updated_at,
   };
+}
+
+export async function lookupUnitOfMeasureBySkus(
+  skus: string[]
+): Promise<Map<string, string | null>> {
+  const result = new Map<string, string | null>();
+  const unique = Array.from(new Set(skus.filter(Boolean)));
+  if (unique.length === 0) {
+    return result;
+  }
+
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("products")
+    .select("sku, unit_of_measure")
+    .eq("tenant_id", TENANT_ID)
+    .in("sku", unique);
+
+  if (error) {
+    console.error("Failed to look up unit_of_measure:", error.message);
+    return result;
+  }
+
+  for (const row of (data ?? []) as Array<{
+    sku: string;
+    unit_of_measure: string | null;
+  }>) {
+    result.set(row.sku, row.unit_of_measure);
+  }
+
+  return result;
+}
+
+export async function mapCartRowsWithUom(
+  rows: PoCartItemRow[]
+): Promise<PoCartItem[]> {
+  const uomBySku = await lookupUnitOfMeasureBySkus(rows.map((row) => row.sku));
+  return rows.map((row) => mapCartRow(row, uomBySku.get(row.sku) ?? null));
 }
 
 function groupKey(supplierExternalId: string | null): string {

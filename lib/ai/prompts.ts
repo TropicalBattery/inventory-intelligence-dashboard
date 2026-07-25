@@ -2,6 +2,7 @@ import {
   NO_EM_DASH_INSTRUCTION,
   NO_RECALCULATE_INSTRUCTION,
 } from "@/lib/ai/config";
+import { formatCasesHelper, parseUom } from "@/lib/format/uom";
 import type { ReorderRecommendation, VelocityDiagnostic } from "@/lib/types";
 
 function formatDate(date: Date | null): string {
@@ -10,6 +11,21 @@ function formatDate(date: Date | null): string {
   }
 
   return date.toISOString().slice(0, 10);
+}
+
+function formatSuggestedQtyForPrompt(rec: ReorderRecommendation): string {
+  const base = `${rec.suggestedQtyRounded.toLocaleString("en-JM")} units`;
+  const pack = parseUom(rec.unitOfMeasure);
+  if (pack.unitsPerCase == null) {
+    return base;
+  }
+
+  const helper = formatCasesHelper(rec.suggestedQtyRounded, pack.unitsPerCase);
+  if (!helper) {
+    return `${base} (${pack.unitsPerCase} per case)`;
+  }
+
+  return `${base} (${pack.unitsPerCase} per case; ${helper})`;
 }
 
 function formatNullableNumber(value: number | null, suffix = ""): string {
@@ -110,7 +126,7 @@ Reorder calculations (already computed, do not change):
 - EOQ: ${formatNullableNumber(rec.eoq, " units")}
 - Safety stock: ${formatNullableNumber(rec.safetyStock, " units")}
 - Reorder point (ROP): ${formatNullableNumber(rec.rop, " units")}
-- Suggested order quantity (rounded): ${rec.suggestedQtyRounded.toLocaleString("en-JM")} units
+- Suggested order quantity (rounded): ${formatSuggestedQtyForPrompt(rec)}
 
 Data gaps / assumptions: ${dataGapsText}
 

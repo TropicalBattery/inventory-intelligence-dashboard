@@ -40,25 +40,31 @@ export function ListingToolbar({
   return (
     <div
       className={[
-        "rounded-2xl border border-transparent bg-white p-4 shadow-card",
+        "w-full max-w-full min-w-0 rounded-2xl border border-transparent bg-white p-4 shadow-card",
         className,
       ]
         .filter(Boolean)
         .join(" ")}
     >
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="flex min-w-0 flex-wrap items-end gap-3">
         {filters}
         {search ? (
-          <div className="min-w-[220px] max-w-md flex-1">{search}</div>
+          <div className="w-full min-w-0 sm:w-auto sm:flex-1 sm:min-w-[14rem] sm:max-w-md">
+            {search}
+          </div>
         ) : null}
         {sort}
       </div>
 
       {actions || meta ? (
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0 text-xs text-[#9CA3AF]">{meta ?? "\u00a0"}</div>
+        <div className="mt-2 flex min-w-0 flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0 max-w-full flex-1 basis-[12rem] break-words text-xs text-[#9CA3AF]">
+            {meta ?? "\u00a0"}
+          </div>
           {actions ? (
-            <div className="flex flex-wrap items-center gap-3">{actions}</div>
+            <div className="flex min-w-0 flex-wrap items-center gap-3">
+              {actions}
+            </div>
           ) : null}
         </div>
       ) : null}

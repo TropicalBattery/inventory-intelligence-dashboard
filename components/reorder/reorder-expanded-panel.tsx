@@ -9,6 +9,7 @@ import { PoStatusBadge } from "@/components/po/po-status-badge";
 import { SeasonalWarningBadge } from "@/components/reorder/seasonal-warning-badge";
 import { AiFormattedText } from "@/components/reorder/ai-formatted-text";
 import { formatCurrencyJMD, formatNumber } from "@/lib/format";
+import { formatCasesHelper, parseUom } from "@/lib/format/uom";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import type { PipelineBreakdown } from "@/lib/pipeline-breakdown";
 import { formatRoundingInfo } from "@/lib/reorder-engine";
@@ -130,29 +131,6 @@ function getCoverPillLabel(
   }
 
   return `${months.toFixed(1)} months cover`;
-}
-
-function getCoverBadgeClasses(
-  months: number | null,
-  demandUnknown: boolean,
-  bands: CoverBands = resolveCoverBands(null)
-): string {
-  if (demandUnknown || months === null) {
-    return "bg-[#F3F4F6] text-[#9CA3AF]";
-  }
-
-  switch (getMonthsOfCoverColorTier(months, bands)) {
-    case "red":
-      return "bg-[#FDF2F2] text-[#CC2B2B]";
-    case "amber":
-      return "bg-[#FFFBEB] text-[#B45309]";
-    case "orange":
-      return "bg-[#FFF7ED] text-[#C2410C]";
-    case "green":
-      return "bg-[#F0FDF4] text-[#16A34A]";
-    default:
-      return "bg-[#F3F4F6] text-[#9CA3AF]";
-  }
 }
 
 function getStatusBadge(rec: ReorderRecommendation): {
@@ -587,6 +565,7 @@ function InventoryDetailsSection({
     rec.maximumStockLevel !== null && rec.maximumStockLevel !== 0;
   const showRounding = roundingInfo !== "-";
   const showLineTotal = lineTotal !== null && lineTotal !== 0;
+  const packInfo = parseUom(rec.unitOfMeasure);
 
   return (
     <div className="mt-5">
@@ -599,6 +578,13 @@ function InventoryDetailsSection({
           iconClass="ti-package"
           value={formatInventoryNumber(rec.quantityAvailable)}
         />
+        {packInfo.unitsPerCase != null ? (
+          <InventoryDetailItem
+            label="Pack"
+            iconClass="ti-box"
+            value={`${formatNumber(packInfo.unitsPerCase)} per case`}
+          />
+        ) : null}
         {showQtyOnOrder ? (
           <InventoryDetailItem
             label="Qty On Order"
@@ -936,9 +922,24 @@ export function ReorderExpandedPanel({
             Suggested Order
           </p>
           <div className="mb-4 flex items-center gap-3">
-            <p className="text-5xl font-bold text-[#111111]">
-              {formatNumber(rec.suggestedQtyRounded)}
-            </p>
+            <div>
+              <p className="text-5xl font-bold text-[#111111]">
+                {formatNumber(rec.suggestedQtyRounded)}
+              </p>
+              {(() => {
+                const pack = parseUom(rec.unitOfMeasure);
+                if (pack.unitsPerCase == null) {
+                  return null;
+                }
+                const helper = formatCasesHelper(
+                  rec.suggestedQtyRounded,
+                  pack.unitsPerCase
+                );
+                return helper ? (
+                  <p className="mt-1 text-xs text-[#9CA3AF]">{helper}</p>
+                ) : null;
+              })()}
+            </div>
             {statusBadge ? (
               <span className={statusBadge.className}>{statusBadge.label}</span>
             ) : null}
@@ -946,7 +947,7 @@ export function ReorderExpandedPanel({
 
           <div className="flex flex-wrap gap-2">
             <span
-              className={`rounded-full border px-3 py-1 text-xs font-medium ${getCoverPillClasses(
+              className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-medium leading-none ${getCoverPillClasses(
                 suggestedMonthsOfCover,
                 coverDemandUnknown,
                 rec.coverBands
@@ -1028,7 +1029,7 @@ export function ReorderExpandedPanel({
                 Months of cover
               </span>
               <span
-                className={`rounded-lg px-2.5 py-0.5 text-xs font-semibold ${getCoverBadgeClasses(
+                className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-semibold leading-none ${getCoverPillClasses(
                   debouncedMonthsOfCover,
                   coverDemandUnknown,
                   rec.coverBands
@@ -1197,7 +1198,7 @@ export function ReorderExpandedPanel({
           </div>
 
           <div className="overflow-hidden rounded-xl border border-[#E5E7EB]">
-            <div className="max-h-[17.5rem] overflow-y-auto">
+            <div className="max-h-[17.5rem] overflow-x-auto overflow-y-auto">
               <div className="min-w-[56rem]">
                 <div className="sticky top-0 z-10 grid grid-cols-[minmax(10rem,1.2fr)_6rem_7rem_8rem_7rem_6rem_5.5rem] border-b border-[#E5E7EB] bg-[#F9FAFB] px-4 py-2.5 text-xs font-semibold uppercase tracking-widest text-[#6B7280]">
                   <span>Supplier Name</span>
@@ -1336,6 +1337,23 @@ export function ReorderExpandedPanel({
       <PipelineStockSection rec={rec} pipeline={pipeline} />
 
       <PlatformOpenPosSection rec={rec} />
+
+      {rec.inbound ? (
+        <div className="mt-5 rounded-xl border border-[#BFDBFE] bg-[#EFF6FF]/60 px-4 py-3 text-sm text-[#1E3A8A]">
+          <p>
+            Supplier has {formatNumber(rec.inbound.containerCount)} container
+            {rec.inbound.containerCount === 1 ? "" : "s"} inbound (ETA{" "}
+            {rec.inbound.etaLabel}). Container contents are tracked at supplier
+            level — verify whether this SKU is included before relying on it.{" "}
+            <Link
+              href="/inbound-containers"
+              className="font-medium text-[#1D4ED8] underline underline-offset-2 hover:text-[#1E40AF]"
+            >
+              View inbound containers
+            </Link>
+          </p>
+        </div>
+      ) : null}
 
       <InventoryDetailsSection rec={rec} lineTotal={lineTotal} />
     </div>

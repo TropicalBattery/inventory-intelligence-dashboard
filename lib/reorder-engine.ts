@@ -564,6 +564,7 @@ export function buildReorderRecommendation(
     name: row.name,
     itemClass: row.item_class,
     category: row.category,
+    unitOfMeasure: row.unit_of_measure ?? null,
     isActive: null,
     isWhitelisted: row.is_whitelisted,
     buyerRank: row.buyer_rank,
@@ -615,6 +616,7 @@ export function buildReorderRecommendation(
     seasonality: row.seasonality ?? null,
     openPoQty: 0,
     openPoRefs: [],
+    inbound: null,
   };
 }
 

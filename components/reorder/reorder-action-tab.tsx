@@ -30,6 +30,8 @@ import {
   TableRow,
 } from "@/components/ui/Table";
 import { formatNumber, formatSuggestedQty } from "@/lib/format";
+import { parseUom } from "@/lib/format/uom";
+import { UomCell } from "@/components/shared/uom-cell";
 import {
   type AbcClass,
 } from "@/lib/reorder/abc";
@@ -45,6 +47,7 @@ import {
   isPurchaseBlockedRule,
   resolveCartSupplierForRule,
 } from "@/lib/reorder/purchase-rules-ui";
+import { inboundReliefStatus } from "@/lib/reorder/inbound-relief";
 import { countReorderTabAttention } from "@/lib/reorder-tab-classification";
 import {
   getStatusBadgeVariant,
@@ -112,7 +115,37 @@ type FilterBarSort =
   | "qty-available-asc"
   | "suggested-qty-desc";
 
-const COLLAPSED_COLUMN_COUNT = 9;
+const COLLAPSED_COLUMN_COUNT = 11;
+
+const SIGNALS_COLUMN_CLASS = "w-14 px-2 text-center";
+/** Room for cover pill + inbound-relief cue ("ETA passed") on one line. */
+const COVER_COLUMN_CLASS = "w-36 overflow-visible px-2";
+
+/**
+ * Uniform micro-label style for every header cell (TBC pattern). Applied via
+ * the thead so plain and sortable headers render identically — Tailwind's
+ * preflight strips text-transform from <button>, so the sortable headers'
+ * buttons also need `uppercase` (see SortableHeader).
+ */
+const HEADER_TEXT_CLASS =
+  "[&_th]:!text-[11px] [&_th]:!font-medium [&_th]:uppercase [&_th]:!tracking-wider [&_th]:text-[#6B7280]";
+
+const STATUS_BADGE_CLASS = "whitespace-nowrap !px-2 leading-none";
+
+/**
+ * Table-only short labels. The shared getStatusLabel stays untouched because
+ * exports, inventory and PO review render the full wording.
+ */
+function getCompactStatusLabel(status: ReorderStatus): string {
+  return status === "reorder_needed" ? "Reorder" : getStatusLabel(status);
+}
+
+const UOM_COLUMN_CLASS = "hidden w-14 px-2 text-left text-xs lg:table-cell";
+const QTY_AVAILABLE_COLUMN_CLASS = "hidden text-right md:table-cell";
+const SUPPLIER_COLUMN_CLASS = "hidden min-w-0 lg:table-cell";
+const TABLE_CONTAINER_CLASS =
+  "w-full max-w-full min-w-0 rounded-none border-0 shadow-none !overflow-visible";
+const TABLE_CLASS = "table-fixed w-full !min-w-0";
 
 const STATUS_ORDER: Record<ReorderStatus, number> = {
   critical: 0,
@@ -136,6 +169,150 @@ const ABC_ROW_BADGE_TITLE: Record<Exclude<AbcClass, null>, string> = {
   B: "Class B - mid movers",
   C: "Class C - long tail",
 };
+
+const FLAG_ICON_CLASS = "ti text-[15px] leading-none";
+
+/** Purple invoice — platform purchase order raised. Shared by rows + legend. */
+function OnPoFlagIcon({
+  title,
+  className,
+}: {
+  title?: string;
+  className?: string;
+}) {
+  return (
+    <i
+      className={[FLAG_ICON_CLASS, "ti-file-invoice text-[#6D28D9]", className]
+        .filter(Boolean)
+        .join(" ")}
+      title={title}
+      aria-label={title ?? "On platform PO"}
+      aria-hidden={title ? undefined : true}
+    />
+  );
+}
+
+/** Blue ship — supplier container on the water. Shared by rows + legend. */
+function InboundFlagIcon({
+  title,
+  className,
+}: {
+  title?: string;
+  className?: string;
+}) {
+  return (
+    <i
+      className={[FLAG_ICON_CLASS, "ti-ship text-[#1D4ED8]", className]
+        .filter(Boolean)
+        .join(" ")}
+      title={title}
+      aria-label={title ?? "Container inbound"}
+      aria-hidden={title ? undefined : true}
+    />
+  );
+}
+
+function FlagsLegend() {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-3 text-[11px] text-[#6B7280]">
+      <span className="font-medium">Flags:</span>
+      <span className="inline-flex items-center gap-1">
+        <OnPoFlagIcon />
+        On platform PO
+      </span>
+      <span className="inline-flex items-center gap-1">
+        <InboundFlagIcon />
+        Container inbound
+      </span>
+    </span>
+  );
+}
+
+/**
+ * Compact per-row flag icons, kept out of the Supplier cell so the name and
+ * chips never compete for width. Icons only in the row; full text on hover.
+ * On PO (platform purchase order) = purple invoice; Inbound (supplier
+ * container on the water, supplier-level) = blue ship. Distinct on purpose.
+ */
+function SignalsCell({ rec }: { rec: ReorderRecommendation }) {
+  const hasOnPo = rec.openPoQty > 0;
+  const hasInbound = Boolean(rec.inbound);
+
+  if (!hasOnPo && !hasInbound) {
+    return <span className="text-[#D1D5DB]">—</span>;
+  }
+
+  const supplierLabel = resolveSupplierDisplayName(
+    rec.supplierName,
+    rec.supplierExternalId
+  );
+
+  const poNumber = rec.openPoRefs[0]?.poNumber;
+  const onPoTitle = hasOnPo
+    ? `On platform PO: ${formatNumber(rec.openPoQty)} unit${
+        rec.openPoQty === 1 ? "" : "s"
+      }${poNumber ? ` (${poNumber})` : ""}`
+    : undefined;
+
+  const inboundTitle = rec.inbound
+    ? `${formatNumber(rec.inbound.containerCount)} container${
+        rec.inbound.containerCount === 1 ? "" : "s"
+      } inbound from ${supplierLabel}, ETA ${rec.inbound.etaLabel}`
+    : undefined;
+
+  return (
+    <span className="inline-flex items-center justify-center gap-1.5">
+      {hasOnPo ? <OnPoFlagIcon title={onPoTitle} /> : null}
+      {hasInbound ? <InboundFlagIcon title={inboundTitle} /> : null}
+    </span>
+  );
+}
+
+/**
+ * Advisory ETA cue beside the COVER pill for Critical/Watch rows only.
+ * Never reclassifies status or changes cover math — presentation only.
+ */
+function InboundReliefCue({ rec }: { rec: ReorderRecommendation }) {
+  if (rec.status !== "critical" && rec.status !== "watch") {
+    return null;
+  }
+
+  const relief = inboundReliefStatus(rec);
+  if (!relief) {
+    return null;
+  }
+
+  if (relief.kind === "imminent") {
+    return (
+      <span
+        className="shrink-0 whitespace-nowrap text-[10px] leading-none text-[#16A34A]"
+        title={relief.label}
+      >
+        {relief.label}
+      </span>
+    );
+  }
+
+  if (relief.kind === "inbound") {
+    return (
+      <span
+        className="shrink-0 whitespace-nowrap text-[10px] leading-none text-[#9CA3AF]"
+        title={relief.label}
+      >
+        inbound
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="shrink-0 whitespace-nowrap text-[10px] leading-none text-[#B45309]"
+      title="Container ETA has passed - stock may not be received yet; check receiving"
+    >
+      ETA passed
+    </span>
+  );
+}
 
 function rowKey(rec: ReorderRecommendation): string {
   return rec.sku;
@@ -286,7 +463,7 @@ function SortableHeader({
       <button
         type="button"
         onClick={() => onSort(sortKey)}
-        className="inline-flex items-center gap-1 hover:text-slate-900"
+        className="inline-flex items-center gap-1 uppercase hover:text-slate-900"
       >
         {label}
         <span className="text-xs text-slate-400">{arrow}</span>
@@ -787,7 +964,7 @@ export function ReorderActionTab({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 w-full max-w-full space-y-6 pr-14">
       <div className="space-y-3 px-1">
         <div className="flex flex-wrap gap-2">
           <span className="rounded-full border border-[#FCA5A5] bg-[#FDF2F2] px-2.5 py-0.5 text-xs font-medium text-[#CC2B2B]">
@@ -811,7 +988,7 @@ export function ReorderActionTab({
         filterDescription={filterDescription}
       />
 
-      <div>
+      <div className="min-w-0 w-full max-w-full">
         <ListingToolbar
           filters={
             <>
@@ -823,7 +1000,7 @@ export function ReorderActionTab({
                   setStatusFilter(values as StatusFilter[])
                 }
                 placeholder="All statuses"
-                className="min-w-[180px]"
+                className="w-full sm:w-44"
               />
               <MultiSelectFilter
                 label="Class"
@@ -833,7 +1010,7 @@ export function ReorderActionTab({
                   setAbcClassFilter(values as AbcClassFilter[])
                 }
                 placeholder="All classes"
-                className="min-w-[140px]"
+                className="w-full sm:w-36"
               />
               <MultiSelectFilter
                 label="Supplier"
@@ -841,7 +1018,7 @@ export function ReorderActionTab({
                 selected={supplierFilter}
                 onChange={setSupplierFilter}
                 placeholder="All suppliers"
-                className="min-w-[180px]"
+                className="w-full sm:w-44"
               />
             </>
           }
@@ -867,7 +1044,7 @@ export function ReorderActionTab({
             </>
           }
           sort={
-            <div className="min-w-[180px]">
+            <div className="w-full sm:w-44">
               <label htmlFor="sort-filter" className={listingLabelClassName}>
                 Sort
               </label>
@@ -880,7 +1057,7 @@ export function ReorderActionTab({
                   setSortKey(applied.sortKey);
                   setSortDirection(applied.sortDirection);
                 }}
-                className={`${listingControlClassName} w-full min-w-[180px]`}
+                className={`${listingControlClassName} w-full min-w-0`}
               >
                 <option value="" disabled hidden>
                   Custom
@@ -959,11 +1136,14 @@ export function ReorderActionTab({
             </>
           }
           meta={
-            <p title="Sourced from the buyer's Order Tool item master">
-              {activeInventorySkuCount != null && activeInventorySkuCount > 0
-                ? `Showing active inventory only (${activeInventorySkuCount.toLocaleString("en-US")} SKUs)`
-                : "\u00a0"}
-            </p>
+            <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
+              <p title="Sourced from the buyer's Order Tool item master">
+                {activeInventorySkuCount != null && activeInventorySkuCount > 0
+                  ? `Showing active inventory only (${activeInventorySkuCount.toLocaleString("en-US")} SKUs)`
+                  : "\u00a0"}
+              </p>
+              <FlagsLegend />
+            </div>
           }
         />
         <p className="mt-2 text-xs text-[#9CA3AF]">
@@ -980,16 +1160,19 @@ export function ReorderActionTab({
           </div>
         ) : null}
 
-        <Card className="mt-4 rounded-2xl p-0">
+        <Card className="mt-4 w-full max-w-full min-w-0 overflow-visible rounded-2xl p-0">
         {sortedMainRows.length === 0 ? (
           <div className="px-6 py-10 text-center text-sm text-slate-500">
             No rows match the current filters.
           </div>
         ) : (
-          <Table containerClassName="rounded-2xl border-0 !overflow-visible">
-            <TableHeader className="bg-[#F9FAFB] [&_th]:sticky [&_th]:top-[5.125rem] [&_th]:z-20 [&_th]:bg-[#F9FAFB]">
+          <Table
+            className={TABLE_CLASS}
+            containerClassName={TABLE_CONTAINER_CLASS}
+          >
+            <TableHeader className={`bg-[#F9FAFB] [&_th]:sticky [&_th]:top-[5.125rem] [&_th]:z-20 [&_th]:bg-[#F9FAFB] ${HEADER_TEXT_CLASS}`}>
               <TableRow className="hover:bg-transparent">
-                <TableHead className="w-10">
+                <TableHead className="w-10 px-2">
                   <input
                     ref={selectAllCheckboxRef}
                     type="checkbox"
@@ -1006,7 +1189,7 @@ export function ReorderActionTab({
                   activeSortKey={sortKey}
                   direction={sortDirection}
                   onSort={handleSort}
-                  className="w-32"
+                  className="w-24 px-2"
                 />
                 <SortableHeader
                   label="SKU"
@@ -1014,6 +1197,7 @@ export function ReorderActionTab({
                   activeSortKey={sortKey}
                   direction={sortDirection}
                   onSort={handleSort}
+                  className="w-28 px-2"
                 />
                 <SortableHeader
                   label="Product Name"
@@ -1021,8 +1205,9 @@ export function ReorderActionTab({
                   activeSortKey={sortKey}
                   direction={sortDirection}
                   onSort={handleSort}
-                  className="max-w-[180px]"
+                  className="min-w-0 px-2"
                 />
+                <TableHead className={UOM_COLUMN_CLASS}>UOM</TableHead>
                 <SortableHeader
                   label="Qty Available"
                   sortKey="quantityAvailable"
@@ -1030,6 +1215,7 @@ export function ReorderActionTab({
                   direction={sortDirection}
                   onSort={handleSort}
                   align="right"
+                  className={`${QTY_AVAILABLE_COLUMN_CLASS} w-20 px-2 !whitespace-normal`}
                 />
                 <SortableHeader
                   label="Suggested Qty"
@@ -1038,6 +1224,7 @@ export function ReorderActionTab({
                   direction={sortDirection}
                   onSort={handleSort}
                   align="right"
+                  className="w-20 px-2 !whitespace-normal"
                 />
                 <SortableHeader
                   label="Supplier"
@@ -1045,9 +1232,11 @@ export function ReorderActionTab({
                   activeSortKey={sortKey}
                   direction={sortDirection}
                   onSort={handleSort}
+                  className={`${SUPPLIER_COLUMN_CLASS} w-28 px-2`}
                 />
-                <TableHead>Months of Cover</TableHead>
-                <TableHead className="w-10 text-right">
+                <TableHead className={SIGNALS_COLUMN_CLASS}>Flags</TableHead>
+                <TableHead className={COVER_COLUMN_CLASS}>Cover</TableHead>
+                <TableHead className="w-8 px-1 text-right">
                   <span className="sr-only">Expand</span>
                 </TableHead>
               </TableRow>
@@ -1060,6 +1249,7 @@ export function ReorderActionTab({
                 const seasonalityProfile = seasonalityBySku[rec.sku] ?? null;
                 const doNotBuyBadge = getDoNotBuyBadgeMeta(rec.purchaseRule);
                 const purchaseBlocked = isPurchaseBlockedRule(rec.purchaseRule);
+                const packInfo = parseUom(rec.unitOfMeasure);
 
                 return (
                   <Fragment key={key}>
@@ -1079,7 +1269,7 @@ export function ReorderActionTab({
                         toggleExpanded(key);
                       }}
                     >
-                      <TableCell onClick={(event) => event.stopPropagation()}>
+                      <TableCell className="px-2" onClick={(event) => event.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -1096,13 +1286,13 @@ export function ReorderActionTab({
                           className="h-4 w-4 rounded border-slate-300 text-tbc-red focus:ring-tbc-red/20 disabled:cursor-not-allowed disabled:opacity-40"
                         />
                       </TableCell>
-                      <TableCell className="w-32">
-                        <span className="inline-flex flex-col items-start gap-1">
+                      <TableCell className="w-24 px-2">
+                        <span className="inline-flex min-w-0 flex-col items-start gap-1">
                           <Badge
                             variant={getStatusBadgeVariant(rec.status)}
-                            className="whitespace-nowrap"
+                            className={STATUS_BADGE_CLASS}
                           >
-                            {getStatusLabel(rec.status)}
+                            {getCompactStatusLabel(rec.status)}
                           </Badge>
                           {doNotBuyBadge ? (
                             <span
@@ -1114,9 +1304,9 @@ export function ReorderActionTab({
                           ) : null}
                         </span>
                       </TableCell>
-                      <TableCell className="font-mono text-sm font-semibold text-slate-900">
-                        <span className="flex items-center gap-2">
-                          {rec.sku}
+                      <TableCell className="w-28 truncate px-2 font-mono text-xs font-semibold text-slate-900" title={rec.sku}>
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span className="truncate">{rec.sku}</span>
                           {rec.abcClass ? (
                             <span
                               className={`${ABC_ROW_BADGE_BASE} ${ABC_ROW_BADGE_TONE[rec.abcClass]}`}
@@ -1128,7 +1318,7 @@ export function ReorderActionTab({
                         </span>
                       </TableCell>
                       <TableCell
-                        className="max-w-[180px] truncate text-sm text-slate-700"
+                        className="min-w-0 truncate px-2 text-sm text-slate-700"
                         title={rec.name ?? undefined}
                       >
                         <span className="inline-flex max-w-full items-center gap-1.5">
@@ -1142,42 +1332,38 @@ export function ReorderActionTab({
                           ) : null}
                         </span>
                       </TableCell>
-                      <TableCell className="text-right tabular-nums">
+                      <TableCell className={UOM_COLUMN_CLASS}>
+                        <UomCell pack={packInfo} />
+                      </TableCell>
+                      <TableCell
+                        className={`${QTY_AVAILABLE_COLUMN_CLASS} w-20 px-2 tabular-nums`}
+                      >
                         {formatNumber(rec.quantityAvailable)}
                       </TableCell>
-                      <TableCell className="text-right font-semibold tabular-nums text-slate-900">
+                      <TableCell className="w-20 px-2 text-right font-semibold tabular-nums text-slate-900">
                         {formatSuggestedQty(rec.suggestedQtyRounded)}
                       </TableCell>
                       <TableCell
-                        className="max-w-[160px] truncate"
+                        className={`${SUPPLIER_COLUMN_CLASS} w-28 truncate px-2`}
                         title={rec.supplierExternalId ?? undefined}
                       >
-                        <span className="inline-flex max-w-full items-center gap-1.5">
-                          <span className="truncate">
-                            {resolveSupplierDisplayName(
-                              rec.supplierName,
-                              rec.supplierExternalId
-                            )}
-                          </span>
-                          {rec.openPoQty > 0 ? (
-                            <span
-                              className="shrink-0 rounded-full bg-[#EFF6FF] px-1.5 text-[10px] font-medium text-[#1D4ED8]"
-                              title={rec.openPoRefs
-                                .map(
-                                  (ref) =>
-                                    `${ref.poNumber} (${ref.status.replace(/_/g, " ")})`
-                                )
-                                .join(", ")}
-                            >
-                              On PO: {formatNumber(rec.openPoQty)}
-                            </span>
-                          ) : null}
+                        <span className="truncate">
+                          {resolveSupplierDisplayName(
+                            rec.supplierName,
+                            rec.supplierExternalId
+                          )}
                         </span>
                       </TableCell>
-                      <TableCell>
-                        <CoverBadge rec={rec} />
+                      <TableCell className={SIGNALS_COLUMN_CLASS}>
+                        <SignalsCell rec={rec} />
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className={COVER_COLUMN_CLASS}>
+                        <span className="inline-flex max-w-full items-center gap-1">
+                          <CoverBadge rec={rec} />
+                          <InboundReliefCue rec={rec} />
+                        </span>
+                      </TableCell>
+                      <TableCell className="w-8 px-1 text-right">
                         <ChevronRight
                           className={`ml-auto h-4 w-4 text-slate-400 transition-transform ${
                             isExpanded ? "rotate-90" : ""
@@ -1209,24 +1395,39 @@ export function ReorderActionTab({
       </div>
 
       {showNoDemandItems && sortedNoDemandRows.length > 0 ? (
-        <div className="space-y-3">
+        <div className="min-w-0 w-full max-w-full space-y-3">
           <p className="px-1 text-sm text-[var(--color-text-secondary)]">
             No demand in last 13 months. May be slow-moving, seasonal, or
             discontinued.
           </p>
-          <Card className="rounded-2xl p-0">
-            <Table containerClassName="rounded-2xl border-0 !overflow-visible">
-              <TableHeader className="bg-[#F9FAFB] [&_th]:sticky [&_th]:top-[5.125rem] [&_th]:z-20 [&_th]:bg-[#F9FAFB]">
+          <Card className="w-full max-w-full min-w-0 overflow-visible rounded-2xl p-0">
+            <Table
+              className={TABLE_CLASS}
+              containerClassName={TABLE_CONTAINER_CLASS}
+            >
+              <TableHeader className={`bg-[#F9FAFB] [&_th]:sticky [&_th]:top-[5.125rem] [&_th]:z-20 [&_th]:bg-[#F9FAFB] ${HEADER_TEXT_CLASS}`}>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead>Select</TableHead>
-                  <TableHead className="w-32">Status</TableHead>
-                  <TableHead>SKU</TableHead>
-                  <TableHead className="max-w-[180px]">Product Name</TableHead>
-                  <TableHead className="text-right">Qty Available</TableHead>
-                  <TableHead className="text-right">Suggested Qty</TableHead>
-                  <TableHead>Supplier</TableHead>
-                  <TableHead>Months of Cover</TableHead>
-                  <TableHead className="w-10 text-right">
+                  <TableHead className="w-10 px-2">
+                    <span className="sr-only">Select</span>
+                  </TableHead>
+                  <TableHead className="w-24 px-2">Status</TableHead>
+                  <TableHead className="w-28 px-2">SKU</TableHead>
+                  <TableHead className="min-w-0 px-2">Product Name</TableHead>
+                  <TableHead className={UOM_COLUMN_CLASS}>UOM</TableHead>
+                  <TableHead
+                    className={`${QTY_AVAILABLE_COLUMN_CLASS} w-20 px-2 !whitespace-normal`}
+                  >
+                    Qty Available
+                  </TableHead>
+                  <TableHead className="w-20 px-2 text-right !whitespace-normal">
+                    Suggested Qty
+                  </TableHead>
+                  <TableHead className={`${SUPPLIER_COLUMN_CLASS} w-28 px-2`}>
+                    Supplier
+                  </TableHead>
+                  <TableHead className={SIGNALS_COLUMN_CLASS}>Flags</TableHead>
+                  <TableHead className={COVER_COLUMN_CLASS}>Cover</TableHead>
+                  <TableHead className="w-8 px-1 text-right">
                     <span className="sr-only">Expand</span>
                   </TableHead>
                 </TableRow>
@@ -1237,6 +1438,7 @@ export function ReorderActionTab({
                   const isExpanded = expandedSkus.has(key);
                   const seasonalityProfile = seasonalityBySku[rec.sku] ?? null;
                   const mutedClassName = "text-[var(--color-text-secondary)]";
+                  const packInfo = parseUom(rec.unitOfMeasure);
 
                   return (
                     <Fragment key={`no-demand-${key}`}>
@@ -1246,7 +1448,10 @@ export function ReorderActionTab({
                         }`}
                         onClick={() => toggleExpanded(key)}
                       >
-                        <TableCell onClick={(event) => event.stopPropagation()}>
+                        <TableCell
+                          className="px-2"
+                          onClick={(event) => event.stopPropagation()}
+                        >
                           <input
                             type="checkbox"
                             disabled
@@ -1254,13 +1459,13 @@ export function ReorderActionTab({
                             className="h-4 w-4 rounded border-slate-300 opacity-40"
                           />
                         </TableCell>
-                        <TableCell className="w-32">
-                          <span className="inline-flex flex-col items-start gap-1">
+                        <TableCell className="w-24 px-2">
+                          <span className="inline-flex min-w-0 flex-col items-start gap-1">
                             <Badge
                               variant={getStatusBadgeVariant(rec.status)}
-                              className="whitespace-nowrap"
+                              className={STATUS_BADGE_CLASS}
                             >
-                              {getStatusLabel(rec.status)}
+                              {getCompactStatusLabel(rec.status)}
                             </Badge>
                             {(() => {
                               const badge = getDoNotBuyBadgeMeta(
@@ -1277,11 +1482,14 @@ export function ReorderActionTab({
                             })()}
                           </span>
                         </TableCell>
-                        <TableCell className="font-mono text-sm font-semibold">
+                        <TableCell
+                          className="w-28 truncate px-2 font-mono text-xs font-semibold"
+                          title={rec.sku}
+                        >
                           {rec.sku}
                         </TableCell>
                         <TableCell
-                          className="max-w-[180px] truncate text-sm"
+                          className="min-w-0 truncate px-2 text-sm"
                           title={rec.name ?? undefined}
                         >
                           <span className="inline-flex max-w-full items-center gap-1.5">
@@ -1295,42 +1503,38 @@ export function ReorderActionTab({
                             ) : null}
                           </span>
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">
+                        <TableCell className={UOM_COLUMN_CLASS}>
+                          <UomCell pack={packInfo} />
+                        </TableCell>
+                        <TableCell
+                          className={`${QTY_AVAILABLE_COLUMN_CLASS} w-20 px-2 tabular-nums`}
+                        >
                           {formatNumber(rec.quantityAvailable)}
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">
+                        <TableCell className="w-20 px-2 text-right tabular-nums">
                           {formatSuggestedQty(rec.suggestedQtyRounded)}
                         </TableCell>
                         <TableCell
-                          className="max-w-[160px] truncate"
+                          className={`${SUPPLIER_COLUMN_CLASS} w-28 truncate px-2`}
                           title={rec.supplierExternalId ?? undefined}
                         >
-                          <span className="inline-flex max-w-full items-center gap-1.5">
-                            <span className="truncate">
-                              {resolveSupplierDisplayName(
-                                rec.supplierName,
-                                rec.supplierExternalId
-                              )}
-                            </span>
-                            {rec.openPoQty > 0 ? (
-                              <span
-                                className="shrink-0 rounded-full bg-[#EFF6FF] px-1.5 text-[10px] font-medium text-[#1D4ED8]"
-                                title={rec.openPoRefs
-                                  .map(
-                                    (ref) =>
-                                      `${ref.poNumber} (${ref.status.replace(/_/g, " ")})`
-                                  )
-                                  .join(", ")}
-                              >
-                                On PO: {formatNumber(rec.openPoQty)}
-                              </span>
-                            ) : null}
+                          <span className="truncate">
+                            {resolveSupplierDisplayName(
+                              rec.supplierName,
+                              rec.supplierExternalId
+                            )}
                           </span>
                         </TableCell>
-                        <TableCell>
-                          <CoverBadge rec={rec} />
+                        <TableCell className={SIGNALS_COLUMN_CLASS}>
+                          <SignalsCell rec={rec} />
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className={COVER_COLUMN_CLASS}>
+                          <span className="inline-flex max-w-full items-center gap-1">
+                            <CoverBadge rec={rec} />
+                            <InboundReliefCue rec={rec} />
+                          </span>
+                        </TableCell>
+                        <TableCell className="w-8 px-1 text-right">
                           <ChevronRight
                             className={`ml-auto h-4 w-4 transition-transform ${
                               isExpanded ? "rotate-90" : ""
@@ -1366,7 +1570,7 @@ export function ReorderActionTab({
         </div>
       ) : null}
 
-      <div className="sticky bottom-0 z-40 -mx-2 space-y-3 rounded-2xl border border-transparent bg-white px-6 py-4 shadow-card shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+      <div className="sticky bottom-0 z-40 w-full max-w-full min-w-0 space-y-3 rounded-2xl border border-transparent bg-white px-4 py-4 shadow-card shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] sm:px-6">
         {bulkOpenPoConfirmPending && bulkOpenPoAffected.length > 0 ? (
           <div
             role="status"

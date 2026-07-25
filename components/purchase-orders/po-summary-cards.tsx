@@ -20,6 +20,10 @@ function amountOrZero(value: number | null | undefined): number {
   return value;
 }
 
+function isPricedOrder(order: PurchaseOrderListItem): boolean {
+  return !order.hasUnknownLineCosts;
+}
+
 function isInCurrentCalendarMonth(poDate: string | null): boolean {
   if (!poDate) {
     return false;
@@ -51,11 +55,16 @@ export function computePoListSummary(
   let pendingCount = 0;
 
   for (const order of orders) {
-    const amount = amountOrZero(order.totalAmount);
-    allTimeTotal += amount;
+    if (isPricedOrder(order)) {
+      const amount = amountOrZero(order.totalAmount);
+      allTimeTotal += amount;
 
-    if (isInCurrentCalendarMonth(order.poDate)) {
-      monthTotal += amount;
+      if (isInCurrentCalendarMonth(order.poDate)) {
+        monthTotal += amount;
+        monthOrderCount += 1;
+      }
+    } else if (isInCurrentCalendarMonth(order.poDate)) {
+      // Unpriced POs still count toward this month's order count.
       monthOrderCount += 1;
     }
 

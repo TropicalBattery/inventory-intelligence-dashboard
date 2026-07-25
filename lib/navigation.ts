@@ -13,6 +13,11 @@ export const navItems: NavItem[] = [
     label: "Purchase Orders",
     iconClass: "ti-receipt",
   },
+  {
+    href: "/inbound-containers",
+    label: "Inbound Containers",
+    iconClass: "ti-ship",
+  },
   { href: "/exceptions", label: "Exceptions", iconClass: "ti-alert-octagon" },
   { href: "/reference-data", label: "Reference Data", iconClass: "ti-database" },
   {
@@ -27,6 +32,7 @@ export const pageTitles: Record<string, string> = {
   "/inventory": "Inventory",
   "/reorder": "Reorder",
   "/purchase-orders": "Purchase Orders",
+  "/inbound-containers": "Inbound Containers",
   "/exceptions": "Data exceptions",
   "/reference-data": "Reference Data",
   "/connector-health": "Connector Health",
@@ -37,6 +43,8 @@ export const pageSubtitles: Record<string, string> = {
   "/reorder": "Review and action reorder recommendations",
   "/inventory": "Browse on-hand inventory across all SKUs",
   "/purchase-orders": "Manage purchase orders and drafts",
+  "/inbound-containers":
+    "Expected inbound containers and pallets from the latest upload",
   "/exceptions":
     "Items needing data cleanup before their numbers can be trusted",
   "/reference-data": "Maintain supplier and item reference data",

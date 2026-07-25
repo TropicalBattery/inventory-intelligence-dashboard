@@ -11,6 +11,7 @@ const samplePo: PurchaseOrderDocument = {
   status: "draft",
   totalAmount: 0,
   hasUnknownLineCosts: true,
+  unpricedLineCount: 1,
   memo:
     "Here is a draft cover note for the purchase order:\n\nThis purchase order has been raised to replenish fast-moving inventory ahead of expected demand.",
   sentAt: null,

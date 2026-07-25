@@ -8,9 +8,12 @@ import {
   getApproveBlockReason,
   type UserRole,
 } from "@/lib/auth/role-guards";
-import { formatCurrencyUSD, formatDateTime } from "@/lib/format";
+import { formatCurrencyUSD, formatDateTime, formatNumber } from "@/lib/format";
 import { canTransition } from "@/lib/po/approval";
-import type { PurchaseOrderListItem } from "@/lib/types";
+import type {
+  PurchaseOrderListItem,
+  PurchaseOrderListLineSummary,
+} from "@/lib/types";
 
 type PoListCardProps = {
   order: PurchaseOrderListItem;
@@ -20,6 +23,32 @@ type PoListCardProps = {
 
 const iconButtonClassName =
   "flex h-9 w-9 items-center justify-center rounded-lg border border-[#E5E7EB] text-[#6B7280] transition-colors hover:border-[#CC2B2B] hover:text-[#CC2B2B] disabled:cursor-not-allowed disabled:opacity-60";
+
+function formatLineSummary(lines: PurchaseOrderListLineSummary[]): {
+  text: string;
+  title: string;
+} {
+  if (lines.length === 0) {
+    return { text: "No line items", title: "No line items" };
+  }
+
+  const parts = lines.map(
+    (line) => `${formatNumber(line.quantity)} x ${line.productName}`
+  );
+  const full = parts.join(", ");
+
+  if (lines.length === 1) {
+    return { text: full, title: full };
+  }
+
+  if (lines.length <= 3) {
+    return { text: full, title: full };
+  }
+
+  const more = lines.length - 1;
+  const text = `${lines[0].productName} +${more} more items`;
+  return { text, title: full };
+}
 
 export function PoListCard({ order, userRole, userEmail }: PoListCardProps) {
   const router = useRouter();
@@ -55,6 +84,9 @@ export function PoListCard({ order, userRole, userEmail }: PoListCardProps) {
     order.poDate ? formatDateTime(order.poDate) : null,
     order.createdBy ? `Raised by ${order.createdBy}` : null,
   ].filter((part): part is string => Boolean(part));
+
+  const lineSummary = formatLineSummary(order.lines);
+  const countsLabel = `${formatNumber(order.lineCount)} items - ${formatNumber(order.totalUnits)} units`;
 
   async function runTransition(
     toStatus: "pending_approval" | "approved" | "suppressed"
@@ -117,6 +149,13 @@ export function PoListCard({ order, userRole, userEmail }: PoListCardProps) {
         <p className="mt-1 truncate text-xs text-[#6B7280]">
           {metaParts.join(" · ")}
         </p>
+        <p
+          className="mt-1 truncate text-xs text-[#374151]"
+          title={lineSummary.title}
+        >
+          {lineSummary.text}
+        </p>
+        <p className="mt-0.5 text-[10px] text-[#9CA3AF]">{countsLabel}</p>
         {error ? (
           <p className="mt-1 text-[10px] text-[#CC2B2B]" role="alert">
             {error}
@@ -131,6 +170,12 @@ export function PoListCard({ order, userRole, userEmail }: PoListCardProps) {
         <p className="text-lg font-bold text-[#111111]">
           {formatCurrencyUSD(order.totalAmount)}
         </p>
+        {order.hasUnknownLineCosts && order.unpricedLineCount > 0 ? (
+          <p className="mt-0.5 text-[10px] text-[#9CA3AF]">
+            Price not on file for {formatNumber(order.unpricedLineCount)} line
+            {order.unpricedLineCount === 1 ? "" : "s"}
+          </p>
+        ) : null}
       </div>
 
       <div className="mt-0 flex flex-shrink-0 flex-wrap items-center gap-2 max-sm:mt-3 max-sm:w-full">

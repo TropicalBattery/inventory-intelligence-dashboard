@@ -22,12 +22,14 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "recharts": "^3.8.1",
-    "resend": "^6.12.4"
+    "resend": "^6.12.4",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^20.19.0",
     "@types/react": "^18.3.28",
     "@types/react-dom": "^18.3.7",
+    "@types/xlsx": "^0.0.35",
     "autoprefixer": "^10.4.21",
     "eslint": "^8.57.1",
     "eslint-config-next": "^14.2.35",

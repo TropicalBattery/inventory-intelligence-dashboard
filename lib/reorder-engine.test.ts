@@ -18,6 +18,7 @@ function baseRow(overrides: Partial<VwReorderInputsRow> = {}): VwReorderInputsRo
     name: "Test Battery",
     item_class: "A",
     category: "Batteries",
+    unit_of_measure: null,
     quantity_on_hand: 35,
     quantity_available: 20,
     quantity_allocated: 15,

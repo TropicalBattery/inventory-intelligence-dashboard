@@ -25,6 +25,7 @@ function baseInputRow(
     name: "Test",
     item_class: null,
     category: null,
+    unit_of_measure: null,
     quantity_on_hand: 0,
     quantity_available: 0,
     quantity_allocated: 0,

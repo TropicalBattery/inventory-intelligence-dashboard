@@ -1,8 +1,9 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  countUnknownLineCosts,
   hasUnknownLineCosts,
   normalizeStoredLineCost,
-  sumKnownLineTotals,
+  resolvePoDisplayTotal,
 } from "@/lib/po/line-cost";
 import { resolvePoSupplierDisplayName } from "@/lib/po/supplier-display";
 import { stripAiPreamble } from "@/lib/ai/strip-preamble";
@@ -11,8 +12,25 @@ import type {
   PurchaseOrderDocument,
   PurchaseOrderLineDocument,
   PurchaseOrderListItem,
+  PurchaseOrderListLineSummary,
   PurchaseOrderRecord,
 } from "@/lib/types";
+
+type PoLineRow = {
+  po_external_id: string;
+  sku: string | null;
+  quantity_ordered: number | string | null;
+  unit_cost: number | string | null;
+  line_total: number | string | null;
+};
+
+function toQuantity(value: number | string | null | undefined): number {
+  if (value === null || value === undefined || value === "") {
+    return 0;
+  }
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
 
 export async function getPurchaseOrderList(): Promise<PurchaseOrderListItem[]> {
   // Use service role — same as document/detail paths. Session/RLS client
@@ -68,24 +86,120 @@ export async function getPurchaseOrderList(): Promise<PurchaseOrderListItem[]> {
     );
   }
 
-  return orders.map((order) => ({
-    id: order.id,
-    poNumber: order.po_number ?? order.external_id,
-    supplierName: order.supplier_external_id
-      ? supplierNameById.get(order.supplier_external_id) ?? null
-      : null,
-    supplierEmail: order.supplier_external_id
-      ? supplierEmailById.get(order.supplier_external_id) ?? null
-      : null,
-    poDate: order.po_date,
-    totalAmount:
+  const externalIds = orders.map((order) => order.external_id);
+  const linesByPoExternalId = new Map<string, PoLineRow[]>();
+
+  if (externalIds.length > 0) {
+    const { data: lineRows, error: linesError } = await supabase
+      .from("purchase_order_lines")
+      .select("po_external_id, sku, quantity_ordered, unit_cost, line_total")
+      .eq("tenant_id", TENANT_ID)
+      .in("po_external_id", externalIds);
+
+    if (linesError) {
+      console.error(
+        "Failed to fetch purchase order lines for list:",
+        linesError.message
+      );
+    } else {
+      for (const row of (lineRows ?? []) as PoLineRow[]) {
+        const list = linesByPoExternalId.get(row.po_external_id) ?? [];
+        list.push(row);
+        linesByPoExternalId.set(row.po_external_id, list);
+      }
+    }
+  }
+
+  const allSkus = Array.from(
+    new Set(
+      Array.from(linesByPoExternalId.values())
+        .flat()
+        .map((line) => line.sku)
+        .filter((sku): sku is string => Boolean(sku))
+    )
+  );
+
+  let productNameBySku = new Map<string, string | null>();
+  if (allSkus.length > 0) {
+    const { data: products } = await supabase
+      .from("products")
+      .select("sku, name")
+      .eq("tenant_id", TENANT_ID)
+      .in("sku", allSkus);
+
+    productNameBySku = new Map(
+      (products ?? []).map((product) => [product.sku, product.name])
+    );
+  }
+
+  return orders.map((order) => {
+    const rawLines = linesByPoExternalId.get(order.external_id) ?? [];
+    const normalizedLines = rawLines.map((line) => {
+      const quantity = toQuantity(line.quantity_ordered);
+      const cost = normalizeStoredLineCost(
+        line.unit_cost === null || line.unit_cost === undefined
+          ? null
+          : Number(line.unit_cost),
+        quantity,
+        line.line_total === null || line.line_total === undefined
+          ? null
+          : Number(line.line_total)
+      );
+      const sku = line.sku ?? "Unknown";
+      const productName =
+        (line.sku ? productNameBySku.get(line.sku) : null)?.trim() || sku;
+
+      return {
+        sku,
+        productName,
+        quantity,
+        unitCost: cost.unitCost,
+        lineTotal: cost.lineTotal,
+      };
+    });
+
+    const lines: PurchaseOrderListLineSummary[] = normalizedLines.map(
+      (line) => ({
+        sku: line.sku,
+        productName: line.productName,
+        quantity: line.quantity,
+      })
+    );
+
+    const unpricedLineCount = countUnknownLineCosts(normalizedLines);
+    const displayTotal = resolvePoDisplayTotal(normalizedLines);
+    const storedTotal =
       order.total_amount === null || order.total_amount === undefined
         ? null
-        : Number(order.total_amount),
-    status: order.status ?? "draft",
-    sentAt: order.sent_at,
-    createdBy: order.created_by?.trim() || null,
-  }));
+        : Number(order.total_amount);
+
+    return {
+      id: order.id,
+      poNumber: order.po_number ?? order.external_id,
+      supplierName: order.supplier_external_id
+        ? supplierNameById.get(order.supplier_external_id) ?? null
+        : null,
+      supplierEmail: order.supplier_external_id
+        ? supplierEmailById.get(order.supplier_external_id) ?? null
+        : null,
+      poDate: order.po_date,
+      totalAmount:
+        unpricedLineCount > 0
+          ? null
+          : displayTotal ??
+            (storedTotal !== null && Number.isFinite(storedTotal)
+              ? storedTotal
+              : null),
+      hasUnknownLineCosts: unpricedLineCount > 0,
+      unpricedLineCount,
+      lineCount: lines.length,
+      totalUnits: lines.reduce((sum, line) => sum + line.quantity, 0),
+      lines,
+      status: order.status ?? "draft",
+      sentAt: order.sent_at,
+      createdBy: order.created_by?.trim() || null,
+    };
+  });
 }
 
 export async function getPurchaseOrderDocument(
@@ -145,20 +259,22 @@ export async function getPurchaseOrderDocument(
     `purchase order ${po.po_number ?? po.external_id}`
   );
 
-  const { data: products } = await supabase
-    .from("products")
-    .select("sku, name")
-    .eq("tenant_id", TENANT_ID)
-    .in(
-      "sku",
-      (lines ?? [])
-        .map((line) => line.sku)
-        .filter((sku): sku is string => Boolean(sku))
-    );
+  const lineSkus = (lines ?? [])
+    .map((line) => line.sku)
+    .filter((sku): sku is string => Boolean(sku));
 
-  const productNameBySku = new Map(
-    (products ?? []).map((product) => [product.sku, product.name])
-  );
+  let productNameBySku = new Map<string, string | null>();
+  if (lineSkus.length > 0) {
+    const { data: products } = await supabase
+      .from("products")
+      .select("sku, name")
+      .eq("tenant_id", TENANT_ID)
+      .in("sku", lineSkus);
+
+    productNameBySku = new Map(
+      (products ?? []).map((product) => [product.sku, product.name])
+    );
+  }
 
   const documentLines: PurchaseOrderLineDocument[] = (lines ?? []).map(
     (line) => {
@@ -180,8 +296,9 @@ export async function getPurchaseOrderDocument(
     }
   );
 
+  const unpricedLineCount = countUnknownLineCosts(documentLines);
   const unknownLineCosts = hasUnknownLineCosts(documentLines);
-  const computedTotal = sumKnownLineTotals(documentLines);
+  const displayTotal = resolvePoDisplayTotal(documentLines);
   const storedTotal =
     po.total_amount === null || po.total_amount === undefined
       ? null
@@ -192,8 +309,14 @@ export async function getPurchaseOrderDocument(
     poNumber: po.po_number ?? po.external_id,
     poDate: po.po_date ?? new Date().toISOString(),
     status: po.status ?? "draft",
-    totalAmount: unknownLineCosts ? computedTotal : storedTotal ?? computedTotal,
+    totalAmount: unknownLineCosts
+      ? null
+      : displayTotal ??
+        (storedTotal !== null && Number.isFinite(storedTotal)
+          ? storedTotal
+          : null),
     hasUnknownLineCosts: unknownLineCosts,
+    unpricedLineCount,
     memo: po.memo ? stripAiPreamble(po.memo) : null,
     sentAt: po.sent_at,
     createdBy: po.created_by?.trim() || null,

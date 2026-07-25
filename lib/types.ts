@@ -145,6 +145,8 @@ export type VwReorderInputsRow = {
   name: string | null;
   item_class: string | null;
   category: string | null;
+  /** products.unit_of_measure (may encode NxM pack ratios). */
+  unit_of_measure: string | null;
   quantity_on_hand: number | null;
   quantity_available: number | null;
   quantity_allocated: number | null;
@@ -195,6 +197,8 @@ export type ReorderRecommendation = {
   name: string | null;
   itemClass: string | null;
   category: string | null;
+  /** Raw products.unit_of_measure; parse with parseUom for pack display. */
+  unitOfMeasure: string | null;
   isActive: boolean | null;
   /** Soft workflow flag from active_inventory_whitelist (empty table → true). */
   isWhitelisted: boolean;
@@ -273,6 +277,15 @@ export type ReorderRecommendation = {
     status: string;
     quantity: number;
   }>;
+  /**
+   * Supplier-level inbound containers (not SKU-confirmed). Null when this
+   * supplier has nothing on the latest container sheet.
+   */
+  inbound: {
+    containerCount: number;
+    etaLabel: string;
+    nextEtaPort: string | null;
+  } | null;
 };
 
 export type SupplierReference = {
@@ -378,6 +391,12 @@ export type PurchaseOrderRecord = {
   tenant_id: string;
 };
 
+export type PurchaseOrderListLineSummary = {
+  sku: string;
+  productName: string;
+  quantity: number;
+};
+
 export type PurchaseOrderListItem = {
   id: string;
   poNumber: string;
@@ -385,6 +404,11 @@ export type PurchaseOrderListItem = {
   supplierEmail: string | null;
   poDate: string | null;
   totalAmount: number | null;
+  hasUnknownLineCosts: boolean;
+  unpricedLineCount: number;
+  lineCount: number;
+  totalUnits: number;
+  lines: PurchaseOrderListLineSummary[];
   status: string;
   sentAt: string | null;
   createdBy: string | null;
@@ -406,6 +430,7 @@ export type PurchaseOrderDocument = {
   status: string;
   totalAmount: number | null;
   hasUnknownLineCosts: boolean;
+  unpricedLineCount: number;
   memo: string | null;
   sentAt: string | null;
   createdBy: string | null;
@@ -434,6 +459,8 @@ export type PoCartItem = {
   createdBy: string;
   sku: string;
   productName: string | null;
+  /** Looked up from products.unit_of_measure when cart is loaded. */
+  unitOfMeasure: string | null;
   quantity: number;
   supplierExternalId: string | null;
   unitPrice: number | null;

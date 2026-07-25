@@ -102,6 +102,7 @@ export function mapViewRowToInputRow(
     name: row.name,
     item_class: row.item_class,
     category: row.category,
+    unit_of_measure: null,
     quantity_on_hand: toNullableNumber(row.quantity_on_hand),
     quantity_available: toNullableNumber(row.quantity_available),
     quantity_allocated: toNullableNumber(row.quantity_allocated),
@@ -141,6 +142,7 @@ type ProductRow = {
   name: string | null;
   item_class: string | null;
   category: string | null;
+  unit_of_measure: string | null;
   external_id: string;
 };
 
@@ -364,7 +366,7 @@ async function fetchProducts(
   return fetchAllPages<ProductRow>(async (from, to) => {
     const { data, error } = await supabase
       .from("products")
-      .select("sku, name, item_class, category, external_id")
+      .select("sku, name, item_class, category, unit_of_measure, external_id")
       .eq("tenant_id", TENANT_ID)
       .not("sku", "is", null)
       .order("sku", { ascending: true })
@@ -580,6 +582,7 @@ function buildReorderInputRow(
     name: product.name,
     item_class: product.item_class,
     category: product.category,
+    unit_of_measure: product.unit_of_measure ?? null,
     quantity_on_hand: quantityOnHand,
     quantity_available: quantityAvailable,
     quantity_allocated: quantityAllocated,
@@ -884,7 +887,7 @@ export async function fetchReorderInputRowBySku(
 ): Promise<VwReorderInputsRow | null> {
   const { data: product, error: productError } = await supabase
     .from("products")
-    .select("sku, name, item_class, category, external_id")
+    .select("sku, name, item_class, category, unit_of_measure, external_id")
     .eq("tenant_id", TENANT_ID)
     .eq("sku", sku)
     .maybeSingle();

@@ -1,6 +1,10 @@
 import { cache } from "react";
 import { assignAbcClasses } from "@/lib/reorder/abc";
 import { buildReorderRecommendation } from "@/lib/reorder-engine";
+import {
+  attachInboundToRecommendations,
+  getInboundBySupplier,
+} from "@/lib/queries/inbound-by-supplier";
 import { getOpenPoLinesBySku } from "@/lib/queries/open-po-lines";
 import { fetchAllReorderInputRows } from "@/lib/queries/reorder-inputs";
 import { getSupplierNameMap } from "@/lib/queries/suppliers";
@@ -45,17 +49,22 @@ export const getReorderRecommendations = cache(
       return [];
     }
 
-    const [rows, nameMap, openPoBySku] = await Promise.all([
+    const [rows, nameMap, openPoBySku, inboundBySupplier] = await Promise.all([
       fetchAllReorderInputRows(createAdminClient()),
       getSupplierNameMap(),
       getOpenPoLinesBySku(),
+      getInboundBySupplier(),
     ]);
-    const recommendations = withOpenPoLines(
-      withSupplierNames(
-        rows.map((row) => buildReorderRecommendation(row)),
-        nameMap
+    const recommendations = attachInboundToRecommendations(
+      withOpenPoLines(
+        withSupplierNames(
+          rows.map((row) => buildReorderRecommendation(row)),
+          nameMap
+        ),
+        openPoBySku
       ),
-      openPoBySku
+      inboundBySupplier,
+      nameMap
     );
 
     // Relative Pareto ranking over active demand set only (exclude no_demand).

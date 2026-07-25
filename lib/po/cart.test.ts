@@ -9,6 +9,7 @@ function item(overrides: Partial<PoCartItem>): PoCartItem {
     createdBy: "a@b.com",
     sku: "SKU-1",
     productName: "Item",
+    unitOfMeasure: null,
     quantity: 2,
     supplierExternalId: null,
     unitPrice: 10,

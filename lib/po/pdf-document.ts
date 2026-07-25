@@ -456,9 +456,13 @@ function drawTotalsSection(
   });
 
   const totalLabel = po.hasUnknownLineCosts
-    ? "Partial Total (some costs unavailable):"
+    ? `Price not on file for ${po.unpricedLineCount} line${
+        po.unpricedLineCount === 1 ? "" : "s"
+      }:`
     : "Grand Total:";
-  const totalValue = formatCurrency(po.totalAmount ?? 0);
+  const totalValue = po.hasUnknownLineCosts
+    ? "-"
+    : formatCurrency(po.totalAmount ?? 0);
 
   page.drawText(totalLabel, {
     x: boxX + 10,

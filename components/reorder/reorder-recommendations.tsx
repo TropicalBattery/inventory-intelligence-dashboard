@@ -85,8 +85,8 @@ export function ReorderRecommendations({
   }
 
   return (
-    <div className="space-y-6 pb-8">
-      <Card className="rounded-2xl p-0">
+    <div className="min-w-0 w-full max-w-full space-y-6 pb-8">
+      <Card className="min-w-0 w-full max-w-full overflow-visible rounded-2xl p-0">
         <ReorderTabBar
           activeTab={activeTab}
           reorderAttentionCount={reorderAttentionCount}
@@ -97,7 +97,7 @@ export function ReorderRecommendations({
           onTabChange={handleTabChange}
         />
 
-        <div className="p-4 sm:p-6">
+        <div className="min-w-0 w-full max-w-full p-4 sm:p-6">
           {activeTab === "reorder" ? (
             <ReorderActionTab
               recommendations={whitelistedReorderAction}

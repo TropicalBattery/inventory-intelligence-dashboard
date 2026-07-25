@@ -109,6 +109,37 @@ Join to purchase_orders on po_number (or
 po_external_id = purchase_orders.external_id).
 Use for PO line detail / qty ordered questions.
 
+TABLE: inbound_containers
+- id, tenant_id, supplier
+- supplier_invoice, quote_ref
+- container_count (numeric), container_size (e.g. 20FT/40FT)
+- eta_port, eta_warehouse (text; may be ISO date or TBA)
+- bl_number, container_numbers
+- source_month (e.g. JULY 2026), loaded_at
+- entry_source: 'upload' (xlsx bulk import) | 'manual' (in-app entry)
+- status: 'inbound' | 'arrived'
+- arrived_at (set when marked arrived; null while inbound)
+- created_by / updated_by (user email for manual edits)
+Rows come from Excel upload (Storage bucket
+container-uploads/latest.xlsx, month-scoped replace of
+upload rows only) OR manual in-app entry. Manual rows are
+never wiped by an upload refresh. Filter by
+tenant_id = 'tropical-battery'. Use to answer questions
+like "what's arriving from Yigit this month?" or "how many
+containers are inbound?" — sum container_count and group
+by supplier / container_size / eta_port.
+Only status='inbound' counts as inbound relief / "still
+coming". Arrived containers are historical for that
+shipment and must NOT be treated as stock still on the
+water.
+IMPORTANT: inbound_containers is SUPPLIER-LEVEL only —
+there is no SKU/product link. A supplier having containers
+inbound does NOT confirm that any specific SKU is aboard.
+When discussing whether to reorder from a supplier, mention
+inbound containers for that supplier if present, and always
+state the caveat that contents are not SKU-confirmed and
+the buyer should verify before relying on inbound stock.
+
 TABLE: po_cart_items
 - id, tenant_id, created_by, sku, product_name
 - quantity, supplier_external_id, unit_price
@@ -186,6 +217,14 @@ RULES:
   sales_transactions.unit_price / net_amount are JMD.
   po_cart_items.unit_price and purchase_order_lines
   unit_cost are typically USD.
+- products.unit_of_measure may be a plain unit (EACH, PAIL)
+  or a pack-schedule code that encodes units-per-case
+  (NxM patterns such as ACC_12X1, CAS-6X1, 12X1 → N units
+  per case). The platform parses units-per-case from these
+  codes. When a pack ratio is known, express large suggested
+  quantities in both units and approximate cases
+  (e.g. 1,200 units ≈ 100 cases of 12). Never treat the raw
+  schedule code itself as a display unit.
 - Sales history EXISTS in sales_transactions and
   vw_monthly_sales_by_sku. Never claim the database
   has no sales history. Prefer vw_monthly_sales_by_sku

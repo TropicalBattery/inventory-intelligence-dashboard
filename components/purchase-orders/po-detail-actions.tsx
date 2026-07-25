@@ -6,7 +6,7 @@ import { useEffect, useState, useTransition } from "react";
 import { PoStatusBadge } from "@/components/po/po-status-badge";
 import { PoTransitionButtons } from "@/components/po/po-transition-buttons";
 import type { UserRole } from "@/lib/auth/role-guards";
-import { formatCurrencyUSD, formatDateTime } from "@/lib/format";
+import { formatCurrencyUSD, formatDateTime, formatNumber } from "@/lib/format";
 import type { PurchaseOrderDocument } from "@/lib/types";
 
 type PoDetailActionsProps = {
@@ -102,10 +102,16 @@ export function PoDetailActions({
             ORDER VALUE
           </p>
           <p className="text-lg font-bold text-[#111111]">
-            {purchaseOrder.hasUnknownLineCosts
-              ? `Partial ${formatCurrencyUSD(purchaseOrder.totalAmount)}`
-              : formatCurrencyUSD(purchaseOrder.totalAmount)}
+            {formatCurrencyUSD(purchaseOrder.totalAmount)}
           </p>
+          {purchaseOrder.hasUnknownLineCosts &&
+          purchaseOrder.unpricedLineCount > 0 ? (
+            <p className="mt-0.5 text-[10px] text-[#9CA3AF]">
+              Price not on file for{" "}
+              {formatNumber(purchaseOrder.unpricedLineCount)} line
+              {purchaseOrder.unpricedLineCount === 1 ? "" : "s"}
+            </p>
+          ) : null}
         </div>
 
         <div className="mt-0 flex shrink-0 flex-wrap items-center gap-2 max-sm:mt-3 max-sm:w-full">

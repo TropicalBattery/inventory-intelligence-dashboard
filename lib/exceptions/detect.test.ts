@@ -20,6 +20,7 @@ function rec(
     name: overrides.name ?? overrides.sku,
     itemClass: null,
     category: null,
+    unitOfMeasure: null,
     isActive: null,
     isWhitelisted: true,
     buyerRank: null,
@@ -76,6 +77,7 @@ function rec(
     seasonality: null,
     openPoQty: 0,
     openPoRefs: [],
+    inbound: null,
     ...overrides,
   };
 }

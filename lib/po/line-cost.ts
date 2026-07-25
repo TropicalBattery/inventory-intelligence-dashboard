@@ -70,3 +70,23 @@ export function hasUnknownLineCosts(
 ): boolean {
   return lines.some((line) => line.unitCost === null);
 }
+
+export function countUnknownLineCosts(
+  lines: Array<{ unitCost: number | null }>
+): number {
+  return lines.filter((line) => line.unitCost === null).length;
+}
+
+/**
+ * Display total for a PO: known sum only when every line has a price.
+ * Returns null when any line is unpriced so UI can show "-" instead of US$0.00.
+ */
+export function resolvePoDisplayTotal(
+  lines: Array<{ unitCost: number | null; lineTotal: number | null }>
+): number | null {
+  if (hasUnknownLineCosts(lines)) {
+    return null;
+  }
+
+  return sumKnownLineTotals(lines);
+}

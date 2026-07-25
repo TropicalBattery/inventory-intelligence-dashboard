@@ -9,7 +9,9 @@ import {
   fetchUserCartItems,
   lookupSupplierNames,
   lookupSupplierUnitPrice,
+  lookupUnitOfMeasureBySkus,
   mapCartRow,
+  mapCartRowsWithUom,
 } from "@/lib/po/cart";
 import {
   getItemPurchaseRuleForSku,
@@ -28,7 +30,7 @@ export async function GET() {
     }
 
     const rows = await fetchUserCartItems(auth.email);
-    const items = rows.map(mapCartRow);
+    const items = await mapCartRowsWithUom(rows);
     const supplierIds = Array.from(
       new Set(
         items
@@ -129,7 +131,10 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({ item: mapCartRow(data) });
+    const uomBySku = await lookupUnitOfMeasureBySkus([sku]);
+    return NextResponse.json({
+      item: mapCartRow(data, uomBySku.get(sku) ?? null),
+    });
   } catch (error) {
     console.error("POST /api/po-cart failed:", error);
     return NextResponse.json(

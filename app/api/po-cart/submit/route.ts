@@ -6,6 +6,7 @@ import { logPoAudit } from "@/lib/po/approval";
 import { fetchUserCartItems, mapCartRow } from "@/lib/po/cart";
 import {
   computeLineTotal,
+  hasUnknownLineCosts,
   sumKnownLineTotals,
 } from "@/lib/po/line-cost";
 import { generatePoNumber } from "@/lib/po/po-number";
@@ -35,7 +36,7 @@ export async function POST(request: Request) {
 
     const cartRows = await fetchUserCartItems(auth.email);
     const items = cartRows
-      .map(mapCartRow)
+      .map((row) => mapCartRow(row))
       .filter((item) => item.supplierExternalId === supplierExternalId);
 
     if (items.length === 0) {
@@ -71,9 +72,11 @@ export async function POST(request: Request) {
     const poNumber = await generatePoNumber();
     const now = new Date().toISOString();
     const lineTotals = items.map((item) => ({
+      unitCost: item.unitPrice,
       lineTotal: computeLineTotal(item.quantity, item.unitPrice),
     }));
-    const totalAmount = sumKnownLineTotals(lineTotals);
+    const unknownPrices = hasUnknownLineCosts(lineTotals);
+    const totalAmount = unknownPrices ? null : sumKnownLineTotals(lineTotals);
 
     const { data: purchaseOrder, error: orderError } = await supabase
       .from("purchase_orders")

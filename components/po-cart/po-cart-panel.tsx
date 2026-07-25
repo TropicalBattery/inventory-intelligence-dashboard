@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { usePoCart } from "@/components/po-cart/po-cart-provider";
 import { Modal } from "@/components/ui/Modal";
 import { formatCurrencyUSD } from "@/lib/format";
+import { formatCasesHelper, parseUom } from "@/lib/format/uom";
 import type { PoCartGroup, PoCartItem } from "@/lib/types";
 
 function formatGroupSubtotal(group: PoCartGroup): string {
@@ -60,6 +61,19 @@ function CartQtyInput({ item }: { item: PoCartItem }) {
         }}
         className="h-8 w-16 rounded-lg border border-[#E5E7EB] px-2 text-sm text-[#111111] focus:border-[#CC2B2B] focus:outline-none focus:ring-2 focus:ring-[#CC2B2B]/10"
       />
+      {(() => {
+        const pack = parseUom(item.unitOfMeasure);
+        const parsed = Number(value);
+        if (pack.unitsPerCase == null || !Number.isFinite(parsed)) {
+          return null;
+        }
+        const helper = formatCasesHelper(parsed, pack.unitsPerCase);
+        return helper ? (
+          <p className="mt-1 max-w-[5.5rem] text-[10px] text-[#9CA3AF]">
+            {helper}
+          </p>
+        ) : null;
+      })()}
       {error ? (
         <p className="mt-1 max-w-[4rem] text-[10px] text-[#CC2B2B]">{error}</p>
       ) : null}

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePoCart } from "@/components/po-cart/po-cart-provider";
 import { Badge } from "@/components/ui/Badge";
 import { formatCurrencyUSD, formatNumber } from "@/lib/format";
+import { formatCasesHelper, parseUom } from "@/lib/format/uom";
 import {
   isReorderStatus,
   type PoCartFullReviewData,
@@ -82,10 +83,12 @@ function groupSubtotal(items: PoCartItem[]): number | null {
 function QtyInput({
   sku,
   quantity,
+  unitOfMeasure,
   onCommit,
 }: {
   sku: string;
   quantity: number;
+  unitOfMeasure: string | null;
   onCommit: (sku: string, quantity: number) => Promise<void>;
 }) {
   const [value, setValue] = useState(String(quantity));
@@ -114,6 +117,13 @@ function QtyInput({
     return () => window.clearTimeout(timeoutId);
   }, [value, quantity, sku, onCommit]);
 
+  const pack = parseUom(unitOfMeasure);
+  const parsedQty = Number(value);
+  const casesHelper =
+    pack.unitsPerCase != null && Number.isFinite(parsedQty)
+      ? formatCasesHelper(parsedQty, pack.unitsPerCase)
+      : null;
+
   return (
     <div>
       <input
@@ -128,6 +138,9 @@ function QtyInput({
         }}
         className="h-9 w-20 rounded-lg border border-[#E5E7EB] px-2 text-sm text-[#111111] focus:border-[#CC2B2B] focus:outline-none focus:ring-2 focus:ring-[#CC2B2B]/10"
       />
+      {casesHelper ? (
+        <p className="mt-1 text-xs text-[#9CA3AF]">{casesHelper}</p>
+      ) : null}
       {error ? (
         <p className="mt-1 text-[10px] text-[#CC2B2B]">{error}</p>
       ) : null}
@@ -499,6 +512,10 @@ export function PoReview({ initial }: PoReviewProps) {
             group.supplierExternalId ||
             "Supplier";
           const subtotal = groupSubtotal(group.items);
+          const unpricedCount = group.items.filter(
+            (item) =>
+              item.unitPrice === null || !Number.isFinite(item.unitPrice)
+          ).length;
           const hasInvalidQty = group.items.some((item) => !(item.quantity > 0));
           const canSubmit =
             !isUnassigned &&
@@ -687,6 +704,7 @@ export function PoReview({ initial }: PoReviewProps) {
                             <QtyInput
                               sku={row.sku}
                               quantity={row.quantity}
+                              unitOfMeasure={row.unitOfMeasure}
                               onCommit={handleQuantityCommit}
                             />
                             {palletQty !== null && palletQty > 0 ? (
@@ -725,9 +743,17 @@ export function PoReview({ initial }: PoReviewProps) {
 
               {!isUnassigned ? (
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#E5E7EB] px-4 py-4">
-                  <p className="text-lg font-bold text-[#111111]">
-                    {formatUsdOrDash(subtotal)}
-                  </p>
+                  <div className="min-w-0">
+                    <p className="text-lg font-bold text-[#111111]">
+                      {formatUsdOrDash(subtotal)}
+                    </p>
+                    {unpricedCount > 0 ? (
+                      <p className="mt-1 text-xs text-[#B45309]">
+                        This PO has {formatNumber(unpricedCount)} item
+                        {unpricedCount === 1 ? "" : "s"} with no price on file
+                      </p>
+                    ) : null}
+                  </div>
                   <div className="flex flex-wrap items-center gap-3">
                     {submitReason ? (
                       <span className="text-xs text-[#9CA3AF]">

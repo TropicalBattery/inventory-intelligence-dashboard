@@ -36,6 +36,7 @@ function baseReorderRow(
     name: "Test Battery",
     itemClass: "A",
     category: "Batteries",
+    unitOfMeasure: null,
     isActive: true,
     isWhitelisted: true,
     buyerRank: null,
@@ -92,6 +93,7 @@ function baseReorderRow(
     seasonality: null,
     openPoQty: 0,
     openPoRefs: [],
+    inbound: null,
     ...overrides,
   };
 }

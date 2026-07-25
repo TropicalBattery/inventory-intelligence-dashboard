@@ -332,6 +332,7 @@ function mapCriticalViewRowToRecommendation(
     name: row.name,
     itemClass: row.item_class,
     category: row.category,
+    unitOfMeasure: null,
     isActive: true,
     isWhitelisted: true,
     buyerRank: null,
@@ -388,6 +389,7 @@ function mapCriticalViewRowToRecommendation(
     seasonality: null,
     openPoQty: 0,
     openPoRefs: [],
+    inbound: null,
   };
 }
 

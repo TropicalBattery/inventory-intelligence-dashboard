@@ -17,6 +17,7 @@ function baseRec(
     name: "Test",
     itemClass: "BATTERY",
     category: null,
+    unitOfMeasure: null,
     isActive: true,
     isWhitelisted: true,
     buyerRank: null,
@@ -73,6 +74,7 @@ function baseRec(
     seasonality: null,
     openPoQty: 0,
     openPoRefs: [],
+    inbound: null,
     ...overrides,
   };
 }

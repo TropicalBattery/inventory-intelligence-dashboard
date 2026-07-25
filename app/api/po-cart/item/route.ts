@@ -3,7 +3,7 @@ import {
   coercePositiveQuantity,
   requireUserEmail,
 } from "@/lib/po/cart-auth";
-import { lookupSupplierUnitPrice, mapCartRow } from "@/lib/po/cart";
+import { lookupSupplierUnitPrice, lookupUnitOfMeasureBySkus, mapCartRow } from "@/lib/po/cart";
 import {
   getItemPurchaseRuleForSku,
   isPurchaseBlocked,
@@ -111,7 +111,10 @@ export async function PATCH(request: Request) {
       );
     }
 
-    return NextResponse.json({ item: mapCartRow(data) });
+    const uomBySku = await lookupUnitOfMeasureBySkus([sku]);
+    return NextResponse.json({
+      item: mapCartRow(data, uomBySku.get(sku) ?? null),
+    });
   } catch (error) {
     console.error("PATCH /api/po-cart/item failed:", error);
     return NextResponse.json(

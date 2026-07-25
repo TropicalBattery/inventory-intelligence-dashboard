@@ -2,7 +2,7 @@ import {
   buildCartResponse,
   fetchUserCartItems,
   lookupSupplierNames,
-  mapCartRow,
+  mapCartRowsWithUom,
 } from "@/lib/po/cart";
 import { getItemPurchaseRulesBySku } from "@/lib/queries/item-purchase-rules";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -159,7 +159,7 @@ export async function getFullPoCartReviewData(
   createdBy: string
 ): Promise<PoCartFullReviewData> {
   const cartRows = await fetchUserCartItems(createdBy);
-  const items = cartRows.map(mapCartRow);
+  const items = await mapCartRowsWithUom(cartRows);
   const skus = Array.from(new Set(items.map((item) => item.sku)));
 
   const { skuSupplierOptions, activeSuppliers, supplierById } =

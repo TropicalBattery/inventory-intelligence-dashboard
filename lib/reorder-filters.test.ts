@@ -15,6 +15,7 @@ function makeRec(
     name: "Test",
     itemClass: null,
     category: null,
+    unitOfMeasure: null,
     isActive: true,
     isWhitelisted: true,
     buyerRank: null,
@@ -71,6 +72,7 @@ function makeRec(
     seasonality: null,
     openPoQty: 0,
     openPoRefs: [],
+    inbound: null,
     ...overrides,
   };
 }
