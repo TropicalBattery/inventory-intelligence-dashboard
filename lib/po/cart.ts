@@ -3,7 +3,7 @@ import { getSupplierNameMap } from "@/lib/queries/suppliers";
 import { TENANT_ID } from "@/lib/tenant";
 import type { PoCartGroup, PoCartItem, PoCartResponse } from "@/lib/types";
 
-type PoCartItemRow = {
+export type PoCartItemRow = {
   id: string;
   tenant_id: string;
   created_by: string;
@@ -16,6 +16,10 @@ type PoCartItemRow = {
   source_status: string | null;
   added_at: string;
   updated_at: string;
+  lock_override_reason?: string | null;
+  lock_overridden_by?: string | null;
+  lock_overridden_at?: string | null;
+  lock_original_vendor?: string | null;
 };
 
 function toNumber(value: number | string | null | undefined): number | null {
@@ -45,6 +49,10 @@ export function mapCartRow(
     sourceStatus: row.source_status,
     addedAt: row.added_at,
     updatedAt: row.updated_at,
+    lockOverrideReason: row.lock_override_reason ?? null,
+    lockOverriddenBy: row.lock_overridden_by ?? null,
+    lockOverriddenAt: row.lock_overridden_at ?? null,
+    lockOriginalVendor: row.lock_original_vendor ?? null,
   };
 }
 
@@ -164,27 +172,10 @@ export async function fetchUserCartItems(
   return (data ?? []) as PoCartItemRow[];
 }
 
-export async function lookupSupplierUnitPrice(
-  sku: string,
-  supplierExternalId: string
-): Promise<number | null> {
-  const supabase = createAdminClient();
-  const { data, error } = await supabase
-    .from("item_supplier_reference")
-    .select("unit_price")
-    .eq("tenant_id", TENANT_ID)
-    .eq("sku", sku)
-    .eq("supplier_external_id", supplierExternalId)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return toNumber(
-    (data as { unit_price: number | string | null } | null)?.unit_price
-  );
-}
+export {
+  lookupSupplierUnitPrice,
+  supplierExistsForSku,
+} from "@/lib/po/supplier-price";
 
 export async function lookupSupplierNames(
   supplierExternalIds: string[]

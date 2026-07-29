@@ -2,8 +2,13 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  CartSupplierField,
+  type CartSupplierChangePayload,
+} from "@/components/po-cart/cart-supplier-field";
 import { usePoCart } from "@/components/po-cart/po-cart-provider";
 import { Badge } from "@/components/ui/Badge";
+import type { UserRole } from "@/lib/auth/role-guards";
 import { formatCurrencyUSD, formatNumber } from "@/lib/format";
 import { formatCasesHelper, parseUom } from "@/lib/format/uom";
 import {
@@ -21,6 +26,7 @@ import type { PoCartItem, PoCartResponse } from "@/lib/types";
 
 type PoReviewProps = {
   initial: PoCartFullReviewData;
+  userRole: UserRole;
 };
 
 type SuccessBanner = {
@@ -33,20 +39,6 @@ function formatUsdOrDash(value: number | null | undefined): string {
     return "-";
   }
   return formatCurrencyUSD(value);
-}
-
-function formatOptionLabel(option: PoReviewSkuSupplierOption): string {
-  const supplier =
-    option.supplierName?.trim() || option.supplierExternalId;
-  const price =
-    option.unitPrice !== null && Number.isFinite(option.unitPrice)
-      ? formatCurrencyUSD(option.unitPrice)
-      : "-";
-  const lead =
-    option.leadTimeDays !== null && Number.isFinite(option.leadTimeDays)
-      ? `${formatNumber(option.leadTimeDays)}d`
-      : "-";
-  return `${supplier} - ${price} - ${lead}`;
 }
 
 function resolvePalletQty(
@@ -186,11 +178,12 @@ function mergeGroupsFromCartResponse(
   });
 }
 
-export function PoReview({ initial }: PoReviewProps) {
+export function PoReview({ initial, userRole }: PoReviewProps) {
   const { refresh: refreshCart } = usePoCart();
   const [groups, setGroups] = useState<PoReviewGroup[]>(initial.groups);
-  const [skuSupplierOptions] = useState(initial.skuSupplierOptions);
-  const [activeSuppliers] = useState(initial.activeSuppliers);
+  const [skuSupplierOptions, setSkuSupplierOptions] = useState(
+    initial.skuSupplierOptions
+  );
   const [purchaseRulesBySku] = useState(initial.purchaseRulesBySku);
   const [error, setError] = useState<string | null>(null);
   const [submittingSupplierId, setSubmittingSupplierId] = useState<
@@ -234,6 +227,9 @@ export function PoReview({ initial }: PoReviewProps) {
     }
     const data = (await response.json()) as PoCartResponse;
     setGroups((current) => mergeGroupsFromCartResponse(data, current));
+    if (data.skuSupplierOptions) {
+      setSkuSupplierOptions(data.skuSupplierOptions);
+    }
     await refreshCart().catch(() => undefined);
   }, [refreshCart]);
 
@@ -257,8 +253,12 @@ export function PoReview({ initial }: PoReviewProps) {
   }
 
   useEffect(() => {
+    // Snap non-overridden locked lines back to the locked vendor once on mount.
     const lockedNeedingAssign = allItems.filter((item) => {
       const rule = purchaseRulesBySku[item.sku];
+      if (item.lockOverriddenBy) {
+        return false;
+      }
       return (
         rule?.ruleType === "vendor_lock" &&
         Boolean(rule.lockedVendorId) &&
@@ -311,18 +311,20 @@ export function PoReview({ initial }: PoReviewProps) {
     [reloadFromCartApi]
   );
 
-  async function handleSupplierChange(sku: string, supplierExternalId: string) {
-    if (!supplierExternalId) {
+  async function handleSupplierChange(
+    sku: string,
+    payload: CartSupplierChangePayload
+  ) {
+    if (!payload.supplierExternalId) {
       return;
     }
 
     setError(null);
-    try {
-      await patchItem(sku, { supplierExternalId });
-      await reloadFromCartApi();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to assign supplier");
-    }
+    await patchItem(sku, {
+      supplierExternalId: payload.supplierExternalId,
+      ...(payload.override ? { override: payload.override } : {}),
+    });
+    await reloadFromCartApi();
   }
 
   async function handleRemove(sku: string) {
@@ -582,38 +584,12 @@ export function PoReview({ initial }: PoReviewProps) {
                     {group.items.map((row) => {
                       const options = skuSupplierOptions[row.sku] ?? [];
                       const purchaseRule = purchaseRulesBySku[row.sku];
-                      const lockedVendorId =
-                        purchaseRule?.ruleType === "vendor_lock"
-                          ? purchaseRule.lockedVendorId
-                          : null;
-                      const vendorLocked = Boolean(lockedVendorId);
-                      const quotedIds = new Set(
-                        options.map((opt) => opt.supplierExternalId)
-                      );
-                      if (lockedVendorId) {
-                        quotedIds.add(lockedVendorId);
-                      }
-                      const otherSuppliers = activeSuppliers.filter(
-                        (s) => !quotedIds.has(s.externalId)
-                      );
-                      const lockedOption =
-                        lockedVendorId &&
-                        !options.some(
-                          (opt) => opt.supplierExternalId === lockedVendorId
-                        )
-                          ? activeSuppliers.find(
-                              (s) => s.externalId === lockedVendorId
-                            )
-                          : null;
                       const palletQty = resolvePalletQty(row, options);
                       const lineTotal = computeLineTotal(
                         row.quantity,
                         row.unitPrice
                       );
                       const status = row.sourceStatus;
-                      const selectValue = vendorLocked
-                        ? lockedVendorId ?? ""
-                        : (row.supplierExternalId ?? "");
 
                       return (
                         <tr
@@ -640,65 +616,15 @@ export function PoReview({ initial }: PoReviewProps) {
                             )}
                           </td>
                           <td className="px-4 py-3 align-top">
-                            {isUnassigned ? (
-                              <select
-                                className="max-w-[16rem] rounded-lg border border-[#E5E7EB] bg-white px-2 py-1.5 text-sm text-[#111111] focus:border-[#CC2B2B] focus:outline-none focus:ring-2 focus:ring-[#CC2B2B]/10 disabled:cursor-not-allowed disabled:bg-[#F9FAFB] disabled:text-[#6B7280]"
-                                value={selectValue}
-                                disabled={vendorLocked}
-                                title={
-                                  vendorLocked
-                                    ? `Locked to ${lockedVendorId} per buyer rules`
-                                    : undefined
-                                }
-                                onChange={(event) => {
-                                  void handleSupplierChange(
-                                    row.sku,
-                                    event.target.value
-                                  );
-                                }}
-                              >
-                                {!vendorLocked ? (
-                                  <option value="">Select supplier…</option>
-                                ) : null}
-                                {options.length > 0 ? (
-                                  <optgroup label="Quoted for this SKU">
-                                    {options.map((opt) => (
-                                      <option
-                                        key={opt.supplierExternalId}
-                                        value={opt.supplierExternalId}
-                                      >
-                                        {formatOptionLabel(opt)}
-                                      </option>
-                                    ))}
-                                  </optgroup>
-                                ) : null}
-                                {lockedOption ? (
-                                  <option value={lockedOption.externalId}>
-                                    {lockedOption.name?.trim() ||
-                                      lockedOption.supplierCode ||
-                                      lockedOption.externalId}
-                                  </option>
-                                ) : null}
-                                {!vendorLocked && otherSuppliers.length > 0 ? (
-                                  <optgroup label="Other suppliers">
-                                    {otherSuppliers.map((s) => (
-                                      <option
-                                        key={s.externalId}
-                                        value={s.externalId}
-                                      >
-                                        {s.name?.trim() ||
-                                          s.supplierCode ||
-                                          s.externalId}
-                                      </option>
-                                    ))}
-                                  </optgroup>
-                                ) : null}
-                              </select>
-                            ) : (
-                              <span className="text-sm text-[#111111]">
-                                {supplierTitle}
-                              </span>
-                            )}
+                            <CartSupplierField
+                              item={row}
+                              options={options}
+                              purchaseRule={purchaseRule}
+                              userRole={userRole}
+                              onChangeSupplier={(payload) =>
+                                handleSupplierChange(row.sku, payload)
+                              }
+                            />
                           </td>
                           <td className="px-4 py-3 align-top">
                             <QtyInput

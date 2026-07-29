@@ -10,8 +10,14 @@ import {
   type ReactNode,
 } from "react";
 import { PoCartPanel } from "@/components/po-cart/po-cart-panel";
+import type { UserRole } from "@/lib/auth/role-guards";
 import { panelBus } from "@/lib/ui/panel-bus";
-import type { PoCartGroup, PoCartResponse } from "@/lib/types";
+import type {
+  ItemPurchaseRule,
+  PoCartGroup,
+  PoCartResponse,
+} from "@/lib/types";
+import type { PoReviewSkuSupplierOption } from "@/lib/queries/po-cart-review";
 
 export type PoCartAddItemInput = {
   sku: string;
@@ -25,6 +31,7 @@ export type PoCartAddItemInput = {
 export type PoCartUpdatePatch = {
   quantity?: number;
   supplierExternalId?: string | null;
+  override?: { reason: string };
 };
 
 type PoCartContextValue = {
@@ -32,6 +39,9 @@ type PoCartContextValue = {
   totalItems: number;
   isOpen: boolean;
   cartSkus: ReadonlySet<string>;
+  userRole: UserRole;
+  skuSupplierOptions: Record<string, PoReviewSkuSupplierOption[]>;
+  purchaseRulesBySku: Record<string, ItemPurchaseRule>;
   refresh: () => Promise<void>;
   addItem: (item: PoCartAddItemInput) => Promise<void>;
   addItems: (items: PoCartAddItemInput[]) => Promise<void>;
@@ -53,9 +63,21 @@ export function usePoCart(): PoCartContextValue {
   return value;
 }
 
-export function PoCartProvider({ children }: { children: ReactNode }) {
+export function PoCartProvider({
+  children,
+  userRole = "buyer",
+}: {
+  children: ReactNode;
+  userRole?: UserRole;
+}) {
   const [groups, setGroups] = useState<PoCartGroup[]>([]);
   const [totalItems, setTotalItems] = useState(0);
+  const [skuSupplierOptions, setSkuSupplierOptions] = useState<
+    Record<string, PoReviewSkuSupplierOption[]>
+  >({});
+  const [purchaseRulesBySku, setPurchaseRulesBySku] = useState<
+    Record<string, ItemPurchaseRule>
+  >({});
   const [isOpen, setIsOpen] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -67,6 +89,8 @@ export function PoCartProvider({ children }: { children: ReactNode }) {
     const data = (await response.json()) as PoCartResponse;
     setGroups(data.groups ?? []);
     setTotalItems(data.totalItems ?? 0);
+    setSkuSupplierOptions(data.skuSupplierOptions ?? {});
+    setPurchaseRulesBySku(data.purchaseRulesBySku ?? {});
   }, []);
 
   useEffect(() => {
@@ -184,6 +208,7 @@ export function PoCartProvider({ children }: { children: ReactNode }) {
           ...(Object.prototype.hasOwnProperty.call(patch, "supplierExternalId")
             ? { supplierExternalId: patch.supplierExternalId ?? null }
             : {}),
+          ...(patch.override ? { override: patch.override } : {}),
         }),
       });
 
@@ -236,6 +261,9 @@ export function PoCartProvider({ children }: { children: ReactNode }) {
       totalItems,
       isOpen,
       cartSkus,
+      userRole,
+      skuSupplierOptions,
+      purchaseRulesBySku,
       refresh,
       addItem,
       addItems,
@@ -251,6 +279,9 @@ export function PoCartProvider({ children }: { children: ReactNode }) {
       totalItems,
       isOpen,
       cartSkus,
+      userRole,
+      skuSupplierOptions,
+      purchaseRulesBySku,
       refresh,
       addItem,
       addItems,

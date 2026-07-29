@@ -12,6 +12,7 @@ import {
   sanitizeReorderLevel,
   type CoverBands,
 } from "@/lib/reorder/cover-thresholds";
+import { isPurchaseBlockedRule } from "@/lib/reorder/purchase-rules-ui";
 import type {
   ClassifyReorderStatusInput,
   PackSizeInput,
@@ -19,6 +20,7 @@ import type {
   ReorderRecommendation,
   ReorderStatus,
   SuggestedQtyInput,
+  SuggestedQtyZeroReason,
   VwReorderInputsRow,
 } from "@/lib/types";
 
@@ -229,11 +231,13 @@ function resolveSuggestedQtyTarget(
 ): {
   target: number | null;
   dataGaps: string[];
+  /** Set only when target is null (no_demand / no_target). */
+  zeroReason: SuggestedQtyZeroReason | null;
 } {
   const dataGaps: string[] = [];
 
   if (hasCalculableEoq(input)) {
-    return { target: input.eoq!, dataGaps };
+    return { target: input.eoq!, dataGaps, zeroReason: null };
   }
 
   if (hasSaneReorderLevelWithDemand(input, effectiveReorderLevel)) {
@@ -245,7 +249,7 @@ function resolveSuggestedQtyTarget(
         ? `Using default reorder level (${DEFAULT_REORDER_MONTHS} months of demand; EOQ unavailable)`
         : "Using reorder_level as suggested quantity (EOQ unavailable)"
     );
-    return { target: effectiveReorderLevel!, dataGaps };
+    return { target: effectiveReorderLevel!, dataGaps, zeroReason: null };
   }
 
   if (hasLeadTimeCoverageInputs(input)) {
@@ -257,6 +261,7 @@ function resolveSuggestedQtyTarget(
         input.avgDailyDemandUnits! * input.leadTimeDays! * 1.5
       ),
       dataGaps,
+      zeroReason: null,
     };
   }
 
@@ -269,7 +274,11 @@ function resolveSuggestedQtyTarget(
       ? "Demand known but missing cost and lead time inputs - suggested quantity not calculated"
       : "No demand data - suggested quantity not calculated"
   );
-  return { target: null, dataGaps };
+  return {
+    target: null,
+    dataGaps,
+    zeroReason: hasDemand ? "no_target" : "no_demand",
+  };
 }
 
 function resolveReorderThreshold(
@@ -289,15 +298,25 @@ function resolveReorderThreshold(
 
 export function calculateSuggestedQty(
   input: SuggestedQtyInput
-): { suggestedQty: number; dataGaps: string[] } {
+): {
+  suggestedQty: number;
+  dataGaps: string[];
+  suggestedQtyZeroReason: SuggestedQtyZeroReason | null;
+} {
   const effectiveReorderLevel = resolveEffectiveReorderLevel(input);
-  const { target, dataGaps } = resolveSuggestedQtyTarget(
+  const { target, dataGaps, zeroReason } = resolveSuggestedQtyTarget(
     input,
     effectiveReorderLevel
   );
 
   if (target === null || target <= 0) {
-    return { suggestedQty: 0, dataGaps };
+    return {
+      suggestedQty: 0,
+      dataGaps,
+      // target <= 0 with a non-null target is an edge case; only emit coded
+      // reasons from the null-target branches (no_demand / no_target).
+      suggestedQtyZeroReason: target === null ? zeroReason : null,
+    };
   }
 
   const effectiveStock =
@@ -309,10 +328,18 @@ export function calculateSuggestedQty(
   );
 
   if (reorderThreshold !== null && effectiveStock >= reorderThreshold) {
-    return { suggestedQty: 0, dataGaps };
+    return {
+      suggestedQty: 0,
+      dataGaps,
+      suggestedQtyZeroReason: "already_covered",
+    };
   }
 
-  return { suggestedQty: roundToTwoDecimals(target), dataGaps };
+  return {
+    suggestedQty: roundToTwoDecimals(target),
+    dataGaps,
+    suggestedQtyZeroReason: null,
+  };
 }
 
 export function roundToPackSize(input: PackSizeInput): PackSizeResult {
@@ -517,21 +544,24 @@ export function buildReorderRecommendation(
   const rop = calculateROP(row.avg_daily_demand_units, leadTimeDays);
   const reorderLevel = sanitizeReorderLevel(row.reorder_level);
 
-  const { suggestedQty: suggestedQtyRaw, dataGaps: suggestedQtyGaps } =
-    calculateSuggestedQty({
-      quantityAvailable: effectiveAvailable,
-      quantityOnOrder,
-      quantityInPipeline: 0,
-      rop,
-      reorderLevel,
-      maximumStockLevel: row.maximum_stock_level,
-      eoq,
-      avgDailyDemandUnits: row.avg_daily_demand_units,
-      leadTimeDays,
-      orderingCostPerOrder: row.ordering_cost_per_order,
-      holdingCostPerUnitYear: row.holding_cost_per_unit_year,
-      annualDemandUnits: row.annual_demand_units,
-    });
+  const {
+    suggestedQty: suggestedQtyRaw,
+    dataGaps: suggestedQtyGaps,
+    suggestedQtyZeroReason: calcZeroReason,
+  } = calculateSuggestedQty({
+    quantityAvailable: effectiveAvailable,
+    quantityOnOrder,
+    quantityInPipeline: 0,
+    rop,
+    reorderLevel,
+    maximumStockLevel: row.maximum_stock_level,
+    eoq,
+    avgDailyDemandUnits: row.avg_daily_demand_units,
+    leadTimeDays,
+    orderingCostPerOrder: row.ordering_cost_per_order,
+    holdingCostPerUnitYear: row.holding_cost_per_unit_year,
+    annualDemandUnits: row.annual_demand_units,
+  });
   dataGaps.push(...suggestedQtyGaps);
 
   const packSize = roundToPackSize({
@@ -558,6 +588,11 @@ export function buildReorderRecommendation(
     coverBands,
   });
 
+  const purchaseRule = row.purchase_rule;
+  // blocked_rule takes precedence over calc reasons for display.
+  const suggestedQtyZeroReason: SuggestedQtyZeroReason | null =
+    isPurchaseBlockedRule(purchaseRule) ? "blocked_rule" : calcZeroReason;
+
   return {
     tenantId: row.tenant_id,
     sku: row.sku,
@@ -568,7 +603,7 @@ export function buildReorderRecommendation(
     isActive: null,
     isWhitelisted: row.is_whitelisted,
     buyerRank: row.buyer_rank,
-    purchaseRule: row.purchase_rule,
+    purchaseRule,
     quantityOnHand,
     quantityAvailable,
     quantityAllocated,
@@ -613,6 +648,7 @@ export function buildReorderRecommendation(
     palletCount: packSize.palletCount ?? null,
     status,
     dataGaps,
+    suggestedQtyZeroReason,
     seasonality: row.seasonality ?? null,
     openPoQty: 0,
     openPoRefs: [],

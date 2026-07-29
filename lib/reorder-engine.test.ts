@@ -134,6 +134,7 @@ describe("calculateSuggestedQty", () => {
 
     expect(result.suggestedQty).toBe(346.41);
     expect(result.dataGaps).toEqual([]);
+    expect(result.suggestedQtyZeroReason).toBeNull();
   });
 
   it("returns zero when effective stock meets ROP", () => {
@@ -153,6 +154,7 @@ describe("calculateSuggestedQty", () => {
     });
 
     expect(result.suggestedQty).toBe(0);
+    expect(result.suggestedQtyZeroReason).toBe("already_covered");
   });
 
   it("uses lead-time coverage when EOQ and sane reorder_level are unavailable", () => {
@@ -244,6 +246,7 @@ describe("calculateSuggestedQty", () => {
         gap.includes("No demand data - suggested quantity not calculated")
       )
     ).toBe(true);
+    expect(result.suggestedQtyZeroReason).toBe("no_demand");
   });
 
   it("uses default reorder level when GP reorder_level is 0 and demand exists", () => {
@@ -266,6 +269,7 @@ describe("calculateSuggestedQty", () => {
     expect(
       result.dataGaps.some((gap) => gap.includes("Using default reorder level"))
     ).toBe(true);
+    expect(result.suggestedQtyZeroReason).toBeNull();
   });
 
   it("reports missing cost/lead time when demand exists but no qty basis", () => {
@@ -292,6 +296,7 @@ describe("calculateSuggestedQty", () => {
         )
       )
     ).toBe(true);
+    expect(result.suggestedQtyZeroReason).toBe("no_target");
   });
 });
 
@@ -448,6 +453,36 @@ describe("buildReorderRecommendation", () => {
     expect(recommendation.containerCount).toBe(7);
     expect(recommendation.status).toBe("critical");
     expect(recommendation.turnoverRatio).toBeCloseTo(1200 / 35, 2);
+    expect(recommendation.suggestedQtyZeroReason).toBeNull();
+  });
+
+  it("sets blocked_rule over already_covered when purchase rule blocks buys", () => {
+    const recommendation = buildReorderRecommendation(
+      baseRow({
+        // Position well above ROP so calc would be already_covered
+        quantity_available: 80,
+        quantity_on_order: 20,
+        effective_available: 80,
+        purchase_rule: { ruleType: "do_not_buy", lockedVendorId: null },
+      })
+    );
+
+    expect(recommendation.suggestedQtyRaw).toBe(0);
+    expect(recommendation.suggestedQtyZeroReason).toBe("blocked_rule");
+  });
+
+  it("does not set a zero reason for vendor_lock with a real suggested qty", () => {
+    const recommendation = buildReorderRecommendation(
+      baseRow({
+        purchase_rule: {
+          ruleType: "vendor_lock",
+          lockedVendorId: "SUP-1",
+        },
+      })
+    );
+
+    expect(recommendation.suggestedQtyRaw).toBeGreaterThan(0);
+    expect(recommendation.suggestedQtyZeroReason).toBeNull();
   });
 
   it("uses months-of-demand safety stock for foreign suppliers", () => {

@@ -69,6 +69,7 @@ function makeRec(
     palletCount: null,
     status: "no_demand",
     dataGaps: [],
+    suggestedQtyZeroReason: null,
     seasonality: null,
     openPoQty: 0,
     openPoRefs: [],

@@ -71,6 +71,7 @@ function toNumber(value: number | string | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Priority vendor first, then unit price ascending (nulls last). */
 function sortSkuSupplierOptions(
   options: PoReviewSkuSupplierOption[]
 ): PoReviewSkuSupplierOption[] {
@@ -78,18 +79,16 @@ function sortSkuSupplierOptions(
     if (left.isPriorityVendor !== right.isPriorityVendor) {
       return left.isPriorityVendor ? -1 : 1;
     }
-    const leadLeft = left.leadTimeDays ?? Number.POSITIVE_INFINITY;
-    const leadRight = right.leadTimeDays ?? Number.POSITIVE_INFINITY;
-    if (leadLeft !== leadRight) {
-      return leadLeft - leadRight;
-    }
     const priceLeft = left.unitPrice ?? Number.POSITIVE_INFINITY;
     const priceRight = right.unitPrice ?? Number.POSITIVE_INFINITY;
-    return priceLeft - priceRight;
+    if (priceLeft !== priceRight) {
+      return priceLeft - priceRight;
+    }
+    return left.supplierExternalId.localeCompare(right.supplierExternalId);
   });
 }
 
-async function loadSkuOptionsAndSuppliers(skus: string[]): Promise<{
+export async function loadSkuOptionsAndSuppliers(skus: string[]): Promise<{
   skuSupplierOptions: Record<string, PoReviewSkuSupplierOption[]>;
   activeSuppliers: PoReviewActiveSupplier[];
   supplierById: Map<string, SupplierDbRow>;

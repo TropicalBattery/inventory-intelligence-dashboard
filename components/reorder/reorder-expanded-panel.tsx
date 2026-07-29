@@ -8,6 +8,7 @@ import { usePoCart } from "@/components/po-cart/po-cart-provider";
 import { PoStatusBadge } from "@/components/po/po-status-badge";
 import { SeasonalWarningBadge } from "@/components/reorder/seasonal-warning-badge";
 import { AiFormattedText } from "@/components/reorder/ai-formatted-text";
+import { useAppToast } from "@/components/ui/AppToast";
 import { formatCurrencyJMD, formatNumber } from "@/lib/format";
 import { formatCasesHelper, parseUom } from "@/lib/format/uom";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
@@ -34,6 +35,7 @@ import {
   isPurchaseBlockedRule,
   resolveCartSupplierForRule,
 } from "@/lib/reorder/purchase-rules-ui";
+import { getZeroReasonText } from "@/lib/reorder/zero-reason-text";
 import { resolveSupplierDisplayName } from "@/lib/queries/suppliers";
 import { getSeasonalReorderWarning } from "@/lib/seasonality/reorder-warnings";
 import type { ItemSeasonalityProfile } from "@/lib/seasonality/types";
@@ -511,10 +513,12 @@ function AnalysisSection({
   explanation,
   isLoadingExplanation,
   dataGaps,
+  zeroReasonDetail,
 }: {
   explanation: ReorderItemExplanationResult | null;
   isLoadingExplanation: boolean;
   dataGaps: string[];
+  zeroReasonDetail: string | null;
 }) {
   return (
     <div className="mb-5 rounded-lg bg-white p-5 ring-1 ring-slate-200">
@@ -531,8 +535,17 @@ function AnalysisSection({
         ) : null}
       </div>
 
-      {dataGaps.length > 0 ? (
+      {zeroReasonDetail || dataGaps.length > 0 ? (
         <ul className="mt-3 space-y-1.5 border-t border-slate-200 pt-3">
+          {zeroReasonDetail ? (
+            <li className="flex items-start gap-2 text-xs text-slate-600">
+              <Info
+                className="mt-0.5 h-3 w-3 shrink-0 text-slate-400"
+                aria-hidden="true"
+              />
+              <span className="font-medium">{zeroReasonDetail}</span>
+            </li>
+          ) : null}
           {dataGaps.map((gap) => (
             <li
               key={gap}
@@ -736,7 +749,8 @@ export function ReorderExpandedPanel({
   const [isAddingToPo, setIsAddingToPo] = useState(false);
   const [justAdded, setJustAdded] = useState(false);
   const [openPoConfirmPending, setOpenPoConfirmPending] = useState(false);
-  const { addItem, cartSkus } = usePoCart();
+  const { addItem, cartSkus, open: openPoCart } = usePoCart();
+  const { showToast } = useAppToast();
   const skuInCart = cartSkus.has(rec.sku);
 
   useEffect(() => {
@@ -860,6 +874,19 @@ export function ReorderExpandedPanel({
       return;
     }
 
+    // Already in cart: notify only — do not POST again / silently change qty.
+    if (skuInCart) {
+      setOpenPoConfirmPending(false);
+      showToast({
+        message: `${rec.sku} is already in your PO cart`,
+        action: {
+          label: "View cart",
+          onClick: () => openPoCart(),
+        },
+      });
+      return;
+    }
+
     if (
       Number.isFinite(rec.openPoQty) &&
       rec.openPoQty > 0 &&
@@ -899,6 +926,9 @@ export function ReorderExpandedPanel({
       });
       setJustAdded(true);
       setOpenPoConfirmPending(false);
+      showToast({
+        message: `Added ${rec.sku} to PO cart`,
+      });
     } catch (error) {
       setAddToPoError(
         error instanceof Error ? error.message : "Failed to add item to PO"
@@ -1138,7 +1168,9 @@ export function ReorderExpandedPanel({
                 className={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60 ${
                   justAdded
                     ? "bg-[#16A34A] text-white hover:bg-[#15803D]"
-                    : "bg-tbc-red text-white hover:bg-tbc-red-hover"
+                    : skuInCart
+                      ? "border border-[#E5E7EB] bg-white text-[#374151] hover:bg-[#F9FAFB]"
+                      : "bg-tbc-red text-white hover:bg-tbc-red-hover"
                 }`}
               >
                 {justAdded ? (
@@ -1150,8 +1182,8 @@ export function ReorderExpandedPanel({
                   "Adding..."
                 ) : skuInCart ? (
                   <>
-                    <i className="ti ti-plus text-base" aria-hidden="true" />
-                    In cart - update
+                    <i className="ti ti-check text-base" aria-hidden="true" />
+                    In cart - add again
                   </>
                 ) : (
                   <>
@@ -1178,6 +1210,7 @@ export function ReorderExpandedPanel({
         explanation={explanation}
         isLoadingExplanation={isLoadingExplanation}
         dataGaps={dataGaps}
+        zeroReasonDetail={getZeroReasonText(rec)?.detail ?? null}
       />
 
       {!suppliersLoading && suppliers.length > 0 ? (

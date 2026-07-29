@@ -15,9 +15,11 @@ import {
 } from "@/lib/po/cart";
 import {
   getItemPurchaseRuleForSku,
+  getItemPurchaseRulesBySku,
   isPurchaseBlocked,
   purchaseBlockErrorMessage,
 } from "@/lib/queries/item-purchase-rules";
+import { loadSkuOptionsAndSuppliers } from "@/lib/queries/po-cart-review";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { TENANT_ID } from "@/lib/tenant";
 import { NextResponse } from "next/server";
@@ -31,6 +33,7 @@ export async function GET() {
 
     const rows = await fetchUserCartItems(auth.email);
     const items = await mapCartRowsWithUom(rows);
+    const skus = Array.from(new Set(items.map((item) => item.sku)));
     const supplierIds = Array.from(
       new Set(
         items
@@ -38,9 +41,29 @@ export async function GET() {
           .filter((id): id is string => Boolean(id))
       )
     );
-    const supplierNames = await lookupSupplierNames(supplierIds);
+    const [supplierNames, { skuSupplierOptions }, purchaseRules] =
+      await Promise.all([
+        lookupSupplierNames(supplierIds),
+        loadSkuOptionsAndSuppliers(skus),
+        getItemPurchaseRulesBySku(),
+      ]);
 
-    return NextResponse.json(buildCartResponse(items, supplierNames));
+    const purchaseRulesBySku: Record<
+      string,
+      { ruleType: "discontinue" | "do_not_buy" | "vendor_lock"; lockedVendorId: string | null }
+    > = {};
+    for (const sku of skus) {
+      const rule = purchaseRules.get(sku);
+      if (rule) {
+        purchaseRulesBySku[sku] = rule;
+      }
+    }
+
+    return NextResponse.json({
+      ...buildCartResponse(items, supplierNames),
+      skuSupplierOptions,
+      purchaseRulesBySku,
+    });
   } catch (error) {
     console.error("GET /api/po-cart failed:", error);
     return NextResponse.json(

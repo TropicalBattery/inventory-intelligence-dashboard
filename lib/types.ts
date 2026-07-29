@@ -116,6 +116,16 @@ export type ReorderStatus =
 
 export type RoundingUnit = "container" | "pallet" | "unit";
 
+/**
+ * Stable why-suggested-qty-is-zero (or blocked) signal for UI / overrides.
+ * Additive to free-text dataGaps; does not change suggested qty math.
+ */
+export type SuggestedQtyZeroReason =
+  | "already_covered" // effectiveStock >= reorderThreshold
+  | "no_demand" // no demand data — engine has no target
+  | "no_target" // demand exists but no EOQ / reorder-level / lead-time path
+  | "blocked_rule"; // discontinue / do_not_buy purchase rule
+
 export type ItemPurchaseRuleType =
   | "discontinue"
   | "do_not_buy"
@@ -263,6 +273,12 @@ export type ReorderRecommendation = {
   palletCount: number | null;
   status: ReorderStatus;
   dataGaps: string[];
+  /**
+   * Why suggested qty is 0 or purchasing is blocked. Null when suggested qty
+   * is a real positive recommendation (vendor_lock does not set a reason).
+   * Precedence when set: blocked_rule > already_covered > no_demand > no_target.
+   */
+  suggestedQtyZeroReason: SuggestedQtyZeroReason | null;
   /** Auto-detected from monthly sales history; null when no history fetched. */
   seasonality: SeasonalityResult | null;
   /**
@@ -468,6 +484,11 @@ export type PoCartItem = {
   sourceStatus: string | null;
   addedAt: string;
   updatedAt: string;
+  /** Present when an approver overrode vendor_lock for this line. */
+  lockOverrideReason: string | null;
+  lockOverriddenBy: string | null;
+  lockOverriddenAt: string | null;
+  lockOriginalVendor: string | null;
 };
 
 export type PoCartGroup = {
@@ -480,6 +501,22 @@ export type PoCartGroup = {
 export type PoCartResponse = {
   groups: PoCartGroup[];
   totalItems: number;
+  /** ISR options keyed by SKU (included on GET /api/po-cart). */
+  skuSupplierOptions?: Record<
+    string,
+    Array<{
+      supplierExternalId: string;
+      supplierName: string | null;
+      unitPrice: number | null;
+      leadTimeDays: number | null;
+      isPriorityVendor: boolean;
+      palletQty: number | null;
+    }>
+  >;
+  purchaseRulesBySku?: Record<
+    string,
+    { ruleType: ItemPurchaseRuleType; lockedVendorId: string | null }
+  >;
 };
 
 export type VelocityTrend = "accelerating" | "decelerating" | "stable" | "unknown";

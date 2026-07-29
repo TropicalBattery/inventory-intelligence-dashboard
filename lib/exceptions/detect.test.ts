@@ -74,6 +74,7 @@ function rec(
     palletCount: null,
     status: "ok",
     dataGaps: [],
+    suggestedQtyZeroReason: null,
     seasonality: null,
     openPoQty: 0,
     openPoRefs: [],

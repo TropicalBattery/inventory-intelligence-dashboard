@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { CartSupplierField } from "@/components/po-cart/cart-supplier-field";
 import { usePoCart } from "@/components/po-cart/po-cart-provider";
 import { Modal } from "@/components/ui/Modal";
 import { formatCurrencyUSD } from "@/lib/format";
@@ -81,8 +82,71 @@ function CartQtyInput({ item }: { item: PoCartItem }) {
   );
 }
 
+function CartLineRow({ item }: { item: PoCartItem }) {
+  const {
+    removeItem,
+    updateItem,
+    userRole,
+    skuSupplierOptions,
+    purchaseRulesBySku,
+  } = usePoCart();
+  const options = skuSupplierOptions[item.sku] ?? [];
+  const purchaseRule = purchaseRulesBySku[item.sku];
+  const lineTotal =
+    item.unitPrice !== null && Number.isFinite(item.unitPrice)
+      ? item.unitPrice * item.quantity
+      : null;
+
+  return (
+    <li className="border-t border-[#E5E7EB] px-4 py-2.5">
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="font-mono text-xs text-[#6B7280]">{item.sku}</p>
+          <p className="truncate text-sm text-[#111111]">
+            {item.productName?.trim() || "—"}
+          </p>
+          <div className="mt-1.5">
+            <CartSupplierField
+              compact
+              item={item}
+              options={options}
+              purchaseRule={purchaseRule}
+              userRole={userRole}
+              onChangeSupplier={async (payload) => {
+                await updateItem(item.sku, {
+                  supplierExternalId: payload.supplierExternalId,
+                  ...(payload.override
+                    ? { override: payload.override }
+                    : {}),
+                });
+              }}
+            />
+          </div>
+          {lineTotal !== null ? (
+            <p className="mt-1 text-[11px] tabular-nums text-[#9CA3AF]">
+              Line {formatCurrencyUSD(lineTotal)}
+            </p>
+          ) : null}
+        </div>
+        <CartQtyInput item={item} />
+        <button
+          type="button"
+          onClick={() => {
+            void removeItem(item.sku).catch((err: unknown) => {
+              console.error(err);
+            });
+          }}
+          className="shrink-0 rounded-lg p-1.5 text-[#9CA3AF] transition-colors hover:text-[#CC2B2B]"
+          aria-label={`Remove ${item.sku}`}
+        >
+          <i className="ti ti-trash text-base" aria-hidden="true" />
+        </button>
+      </div>
+    </li>
+  );
+}
+
 function CartGroupCard({ group }: { group: PoCartGroup }) {
-  const { removeItem } = usePoCart();
   const isUnassigned = group.supplierExternalId === null;
   const supplierLabel =
     group.supplierName?.trim() ||
@@ -118,30 +182,7 @@ function CartGroupCard({ group }: { group: PoCartGroup }) {
 
       <ul>
         {group.items.map((item) => (
-          <li
-            key={item.id}
-            className="flex items-center gap-3 border-t border-[#E5E7EB] px-4 py-2.5"
-          >
-            <div className="min-w-0 flex-1">
-              <p className="font-mono text-xs text-[#6B7280]">{item.sku}</p>
-              <p className="truncate text-sm text-[#111111]">
-                {item.productName?.trim() || "—"}
-              </p>
-            </div>
-            <CartQtyInput item={item} />
-            <button
-              type="button"
-              onClick={() => {
-                void removeItem(item.sku).catch((err: unknown) => {
-                  console.error(err);
-                });
-              }}
-              className="shrink-0 rounded-lg p-1.5 text-[#9CA3AF] transition-colors hover:text-[#CC2B2B]"
-              aria-label={`Remove ${item.sku}`}
-            >
-              <i className="ti ti-trash text-base" aria-hidden="true" />
-            </button>
-          </li>
+          <CartLineRow key={item.id} item={item} />
         ))}
       </ul>
     </div>

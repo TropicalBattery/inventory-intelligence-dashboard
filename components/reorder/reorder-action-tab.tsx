@@ -48,6 +48,11 @@ import {
   resolveCartSupplierForRule,
 } from "@/lib/reorder/purchase-rules-ui";
 import { inboundReliefStatus } from "@/lib/reorder/inbound-relief";
+import {
+  formatZeroReasonExclusionSummary,
+  getZeroReasonText,
+} from "@/lib/reorder/zero-reason-text";
+import { getZeroReasonNarrative } from "@/lib/reorder/zero-reason-narrative";
 import { countReorderTabAttention } from "@/lib/reorder-tab-classification";
 import {
   getStatusBadgeVariant,
@@ -346,6 +351,196 @@ function rowKey(rec: ReorderRecommendation): string {
   return rec.sku;
 }
 
+function SuggestedQtyCell({ rec }: { rec: ReorderRecommendation }) {
+  const zeroReason = getZeroReasonText(rec);
+
+  return (
+    <span
+      className="font-semibold tabular-nums text-slate-900"
+      title={zeroReason?.detail}
+    >
+      {formatSuggestedQty(rec.suggestedQtyRounded)}
+    </span>
+  );
+}
+
+function StatusCell({ rec }: { rec: ReorderRecommendation }) {
+  const doNotBuyBadge = getDoNotBuyBadgeMeta(rec.purchaseRule);
+
+  return (
+    <span className="inline-flex min-w-0 flex-col items-start gap-1">
+      <Badge
+        variant={getStatusBadgeVariant(rec.status)}
+        className={STATUS_BADGE_CLASS}
+      >
+        {getCompactStatusLabel(rec.status)}
+      </Badge>
+      {doNotBuyBadge ? (
+        <span className={doNotBuyBadge.className} title={doNotBuyBadge.title}>
+          {doNotBuyBadge.label}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+const EXCLUSION_BANNER_CAP = 3;
+
+type ExclusionBannerLine = {
+  sku: string;
+  shortReason: string;
+  detail: string;
+  narrative: string | null;
+};
+
+type AddNotice = {
+  addedCount: number;
+  excluded: ExclusionBannerLine[];
+  /** Parenthetical tally for collapsed (>CAP) headers, e.g. "10 already covered, 2 ordering off". */
+  tallyPhrase: string | null;
+};
+
+/** Amber watch/warning surface — informational guidance, not a failure. */
+const ADD_NOTICE_BANNER_CLASS =
+  "mt-4 w-full rounded-lg border border-[#FDE68A] bg-[#FFFBEB] px-4 py-3 text-sm text-[#92400E]";
+
+function buildExclusionBannerLines(
+  excluded: ReorderRecommendation[]
+): ExclusionBannerLine[] {
+  return excluded.map((rec) => {
+    const text = getZeroReasonText(rec);
+    return {
+      sku: rec.sku,
+      shortReason: text?.short.toLowerCase() ?? "no suggested quantity",
+      detail:
+        text?.detail ??
+        "Selected item needs a suggested quantity greater than 0, or purchasing is blocked.",
+      narrative: getZeroReasonNarrative(rec),
+    };
+  });
+}
+
+/** Parenthetical tally from formatZeroReasonExclusionSummary. */
+function exclusionTallyParenthetical(
+  excluded: Array<Pick<ReorderRecommendation, "suggestedQtyZeroReason">>
+): string | null {
+  const summary = formatZeroReasonExclusionSummary(excluded);
+  if (!summary) {
+    return null;
+  }
+
+  const match = summary.match(/excluded:\s*(.+?)\.?$/i);
+  return match?.[1]?.trim() ?? null;
+}
+
+function ExclusionAccordionList({ lines }: { lines: ExclusionBannerLine[] }) {
+  const [openSkus, setOpenSkus] = useState<Set<string>>(() => new Set());
+
+  function toggleSku(sku: string) {
+    setOpenSkus((current) => {
+      const next = new Set(current);
+      if (next.has(sku)) {
+        next.delete(sku);
+      } else {
+        next.add(sku);
+      }
+      return next;
+    });
+  }
+
+  return (
+    <ul className="mt-1.5">
+      {lines.map((line, index) => {
+        const isOpen = openSkus.has(line.sku);
+        const hasNarrative = Boolean(line.narrative);
+
+        return (
+          <li
+            key={line.sku}
+            className={
+              index === 0 ? undefined : "border-t border-[#FDE68A]/70"
+            }
+          >
+            <button
+              type="button"
+              onClick={() => {
+                if (hasNarrative) {
+                  toggleSku(line.sku);
+                }
+              }}
+              aria-expanded={hasNarrative ? isOpen : undefined}
+              title={line.detail}
+              className="flex w-full items-start gap-1.5 py-1.5 text-left text-xs font-normal text-[#A16207] transition-colors hover:text-[#92400E]"
+            >
+              <ChevronRight
+                className={`mt-0.5 h-3.5 w-3.5 shrink-0 transition-transform duration-150 ${
+                  isOpen ? "rotate-90" : ""
+                } ${hasNarrative ? "opacity-100" : "opacity-40"}`}
+                aria-hidden="true"
+              />
+              <span>
+                {line.sku} — {line.shortReason}
+              </span>
+            </button>
+            {isOpen && line.narrative ? (
+              <p className="w-full pb-2 pl-5 text-xs font-normal leading-relaxed text-[#A16207]/90">
+                {line.narrative}
+              </p>
+            ) : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function AddNoticeBanner({
+  notice,
+  detailsExpanded,
+  onToggleDetails,
+}: {
+  notice: AddNotice;
+  detailsExpanded: boolean;
+  onToggleDetails: () => void;
+}) {
+  const { addedCount, excluded, tallyPhrase } = notice;
+  const n = excluded.length;
+  const itemWord = n === 1 ? "item" : "items";
+  const collapse = n > EXCLUSION_BANNER_CAP;
+  const showLines = !collapse || detailsExpanded;
+  const header =
+    collapse && tallyPhrase
+      ? `${n} ${itemWord} not added (${tallyPhrase})`
+      : `${n} ${itemWord} not added`;
+
+  return (
+    <div role="status" className={ADD_NOTICE_BANNER_CLASS}>
+      {addedCount > 0 ? (
+        <p className="font-medium text-[#92400E]">
+          Added {addedCount} {addedCount === 1 ? "item" : "items"} to PO cart
+        </p>
+      ) : null}
+      {n > 0 ? (
+        <div className={addedCount > 0 ? "mt-2" : undefined}>
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <p className="font-medium">{header}</p>
+            {collapse ? (
+              <button
+                type="button"
+                onClick={onToggleDetails}
+                className="text-xs font-semibold text-[#B45309] underline-offset-2 hover:underline"
+              >
+                {detailsExpanded ? "Hide details" : "Show details"}
+              </button>
+            ) : null}
+          </div>
+          {showLines ? <ExclusionAccordionList lines={excluded} /> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 const coverMonths = (rec: ReorderRecommendation): number => {
   if (!rec.avgDailyDemandUnits || rec.avgDailyDemandUnits <= 0) {
     return Number.POSITIVE_INFINITY;
@@ -542,6 +737,9 @@ export function ReorderActionTab({
   const explanationCacheRef = useRef(explanationCache);
   const explanationLoadingRef = useRef(explanationLoading);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [addNotice, setAddNotice] = useState<AddNotice | null>(null);
+  const [exclusionDetailsExpanded, setExclusionDetailsExpanded] =
+    useState(false);
   const [isPending, setIsPending] = useState(false);
   const [isExporting, setIsExporting] = useState<"csv" | "pdf" | null>(null);
   const { addItems, open: openPoCart } = usePoCart();
@@ -895,6 +1093,8 @@ export function ReorderActionTab({
 
   async function handleAddSelectedToPo() {
     setActionError(null);
+    setAddNotice(null);
+    setExclusionDetailsExpanded(false);
 
     const items = selectedRows
       .filter(
@@ -913,10 +1113,33 @@ export function ReorderActionTab({
         sourceStatus: rec.status,
       }));
 
+    const excludedRecs = selectedRows.filter(
+      (rec) =>
+        !(
+          rec.suggestedQtyRounded > 0 &&
+          !isPurchaseBlockedRule(rec.purchaseRule)
+        )
+    );
+
+    const exclusionNotice = (addedCount: number): AddNotice | null => {
+      if (excludedRecs.length === 0 && addedCount === 0) {
+        return null;
+      }
+      if (excludedRecs.length === 0) {
+        return null;
+      }
+      return {
+        addedCount,
+        excluded: buildExclusionBannerLines(excludedRecs),
+        tallyPhrase:
+          excludedRecs.length > EXCLUSION_BANNER_CAP
+            ? exclusionTallyParenthetical(excludedRecs)
+            : null,
+      };
+    };
+
     if (items.length === 0) {
-      setActionError(
-        "Selected items need a suggested quantity greater than 0 (blocked purchase rules are excluded)"
-      );
+      setAddNotice(exclusionNotice(0));
       return;
     }
 
@@ -937,6 +1160,11 @@ export function ReorderActionTab({
     try {
       await addItems(items);
       openPoCart();
+      // Bulk path has no success toast — surface added + not-added in the banner.
+      const notice = exclusionNotice(items.length);
+      if (notice) {
+        setAddNotice(notice);
+      }
     } catch (error) {
       setActionError(
         error instanceof Error
@@ -954,6 +1182,7 @@ export function ReorderActionTab({
     }
 
     setActionError(null);
+    setAddNotice(null);
     setIsExporting(format);
 
     try {
@@ -1179,6 +1408,16 @@ export function ReorderActionTab({
           apply when no lead time is on file.
         </p>
 
+        {addNotice ? (
+          <AddNoticeBanner
+            notice={addNotice}
+            detailsExpanded={exclusionDetailsExpanded}
+            onToggleDetails={() =>
+              setExclusionDetailsExpanded((current) => !current)
+            }
+          />
+        ) : null}
+
         {actionError ? (
           <div
             role="alert"
@@ -1275,9 +1514,9 @@ export function ReorderActionTab({
                 const isSelected = selectedKeys.has(key);
                 const isExpanded = expandedSkus.has(key);
                 const seasonalityProfile = seasonalityBySku[rec.sku] ?? null;
-                const doNotBuyBadge = getDoNotBuyBadgeMeta(rec.purchaseRule);
                 const purchaseBlocked = isPurchaseBlockedRule(rec.purchaseRule);
                 const packInfo = parseUom(rec.unitOfMeasure);
+                const doNotBuyBadge = getDoNotBuyBadgeMeta(rec.purchaseRule);
 
                 return (
                   <Fragment key={key}>
@@ -1315,22 +1554,7 @@ export function ReorderActionTab({
                         />
                       </TableCell>
                       <TableCell className="w-24 px-2">
-                        <span className="inline-flex min-w-0 flex-col items-start gap-1">
-                          <Badge
-                            variant={getStatusBadgeVariant(rec.status)}
-                            className={STATUS_BADGE_CLASS}
-                          >
-                            {getCompactStatusLabel(rec.status)}
-                          </Badge>
-                          {doNotBuyBadge ? (
-                            <span
-                              className={doNotBuyBadge.className}
-                              title={doNotBuyBadge.title}
-                            >
-                              {doNotBuyBadge.label}
-                            </span>
-                          ) : null}
-                        </span>
+                        <StatusCell rec={rec} />
                       </TableCell>
                       <TableCell className="w-28 truncate px-2 font-mono text-xs font-semibold text-slate-900" title={rec.sku}>
                         <span className="flex min-w-0 items-center gap-1.5">
@@ -1367,8 +1591,8 @@ export function ReorderActionTab({
                       >
                         {formatNumber(rec.quantityAvailable)}
                       </TableCell>
-                      <TableCell className="w-20 px-2 text-right font-semibold tabular-nums text-slate-900">
-                        {formatSuggestedQty(rec.suggestedQtyRounded)}
+                      <TableCell className="w-20 px-2 text-right tabular-nums">
+                        <SuggestedQtyCell rec={rec} />
                       </TableCell>
                       <TableCell
                         className={`${SUPPLIER_COLUMN_CLASS} w-28 truncate px-2`}
@@ -1487,27 +1711,7 @@ export function ReorderActionTab({
                           />
                         </TableCell>
                         <TableCell className="w-24 px-2">
-                          <span className="inline-flex min-w-0 flex-col items-start gap-1">
-                            <Badge
-                              variant={getStatusBadgeVariant(rec.status)}
-                              className={STATUS_BADGE_CLASS}
-                            >
-                              {getCompactStatusLabel(rec.status)}
-                            </Badge>
-                            {(() => {
-                              const badge = getDoNotBuyBadgeMeta(
-                                rec.purchaseRule
-                              );
-                              return badge ? (
-                                <span
-                                  className={badge.className}
-                                  title={badge.title}
-                                >
-                                  {badge.label}
-                                </span>
-                              ) : null;
-                            })()}
-                          </span>
+                          <StatusCell rec={rec} />
                         </TableCell>
                         <TableCell
                           className="w-28 truncate px-2 font-mono text-xs font-semibold"
@@ -1538,7 +1742,7 @@ export function ReorderActionTab({
                           {formatNumber(rec.quantityAvailable)}
                         </TableCell>
                         <TableCell className="w-20 px-2 text-right tabular-nums">
-                          {formatSuggestedQty(rec.suggestedQtyRounded)}
+                          <SuggestedQtyCell rec={rec} />
                         </TableCell>
                         <TableCell
                           className={`${SUPPLIER_COLUMN_CLASS} w-28 truncate px-2`}

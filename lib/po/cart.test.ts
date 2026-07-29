@@ -17,6 +17,10 @@ function item(overrides: Partial<PoCartItem>): PoCartItem {
     sourceStatus: "critical",
     addedAt: "2026-07-13T00:00:00Z",
     updatedAt: "2026-07-13T00:00:00Z",
+    lockOverrideReason: null,
+    lockOverriddenBy: null,
+    lockOverriddenAt: null,
+    lockOriginalVendor: null,
     ...overrides,
   };
 }

@@ -90,6 +90,7 @@ function baseReorderRow(
     palletCount: null,
     status: "reorder_needed",
     dataGaps: [],
+    suggestedQtyZeroReason: null,
     seasonality: null,
     openPoQty: 0,
     openPoRefs: [],

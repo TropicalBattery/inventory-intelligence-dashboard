@@ -3,7 +3,12 @@ import {
   coercePositiveQuantity,
   requireUserEmail,
 } from "@/lib/po/cart-auth";
-import { lookupSupplierUnitPrice, lookupUnitOfMeasureBySkus, mapCartRow } from "@/lib/po/cart";
+import {
+  lookupUnitOfMeasureBySkus,
+  mapCartRow,
+} from "@/lib/po/cart";
+import { lookupSupplierUnitPrice } from "@/lib/po/supplier-price";
+import { resolveVendorLockSupplierChange } from "@/lib/po/vendor-lock-override";
 import {
   getItemPurchaseRuleForSku,
   isPurchaseBlocked,
@@ -42,6 +47,9 @@ export async function PATCH(request: Request) {
       body,
       "supplierExternalId"
     );
+    const hasOverride =
+      Object.prototype.hasOwnProperty.call(body, "override") &&
+      body.override != null;
 
     if (!hasQuantity && !hasSupplier) {
       return NextResponse.json(
@@ -71,22 +79,42 @@ export async function PATCH(request: Request) {
           ? null
           : coerceOptionalString(body.supplierExternalId);
 
-      if (
-        purchaseRule?.ruleType === "vendor_lock" &&
-        purchaseRule.lockedVendorId
-      ) {
-        supplierExternalId = purchaseRule.lockedVendorId;
-      }
+      const lockedVendorId = purchaseRule?.lockedVendorId ?? null;
+      const isVendorLock =
+        purchaseRule?.ruleType === "vendor_lock" && Boolean(lockedVendorId);
 
-      updates.supplier_external_id = supplierExternalId;
-
-      if (supplierExternalId) {
-        updates.unit_price = await lookupSupplierUnitPrice(
+      if (isVendorLock && lockedVendorId) {
+        const resolved = await resolveVendorLockSupplierChange({
           sku,
-          supplierExternalId
-        );
+          lockedVendorId,
+          requestedSupplierExternalId: supplierExternalId,
+          hasOverride,
+          overridePayload: body.override,
+          actorEmail: auth.email,
+        });
+
+        if (!resolved.ok) {
+          return NextResponse.json(
+            { error: resolved.error },
+            { status: resolved.status }
+          );
+        }
+
+        supplierExternalId = resolved.supplierExternalId;
+        updates.supplier_external_id = supplierExternalId;
+        updates.unit_price = resolved.unitPrice;
+        Object.assign(updates, resolved.stampUpdates);
       } else {
-        updates.unit_price = null;
+        updates.supplier_external_id = supplierExternalId;
+
+        if (supplierExternalId) {
+          updates.unit_price = await lookupSupplierUnitPrice(
+            sku,
+            supplierExternalId
+          );
+        } else {
+          updates.unit_price = null;
+        }
       }
     }
 

@@ -35,9 +35,10 @@ export async function POST(request: Request) {
     }
 
     const cartRows = await fetchUserCartItems(auth.email);
-    const items = cartRows
-      .map((row) => mapCartRow(row))
-      .filter((item) => item.supplierExternalId === supplierExternalId);
+    const matchingRows = cartRows.filter(
+      (row) => row.supplier_external_id === supplierExternalId
+    );
+    const items = matchingRows.map((row) => mapCartRow(row));
 
     if (items.length === 0) {
       return NextResponse.json(
@@ -108,7 +109,8 @@ export async function POST(request: Request) {
       );
     }
 
-    const lineRows = items.map((item, index) => {
+    const lineRows = matchingRows.map((row, index) => {
+      const item = items[index]!;
       const lineIndex = String(index + 1).padStart(3, "0");
       const lineTotal = computeLineTotal(item.quantity, item.unitPrice);
 
@@ -124,6 +126,10 @@ export async function POST(request: Request) {
         line_total: lineTotal,
         source_system: "po-cart",
         source_updated_at: now,
+        lock_override_reason: row.lock_override_reason ?? null,
+        lock_overridden_by: row.lock_overridden_by ?? null,
+        lock_overridden_at: row.lock_overridden_at ?? null,
+        lock_original_vendor: row.lock_original_vendor ?? null,
       };
     });
 
