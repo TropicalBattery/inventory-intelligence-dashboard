@@ -57,7 +57,7 @@ export function getPageTitle(pathname: string): string {
   }
 
   if (pathname.startsWith("/purchase-orders/review")) {
-    return "Review purchase order";
+    return "Review cart and create POs";
   }
 
   if (pathname.startsWith("/purchase-orders/new")) {
@@ -77,7 +77,7 @@ export function getPageSubtitle(pathname: string): string | undefined {
   }
 
   if (pathname.startsWith("/purchase-orders/review")) {
-    return "Confirm cart lines before creating draft POs";
+    return "Review grouped cart lines and create supplier purchase orders";
   }
 
   return undefined;

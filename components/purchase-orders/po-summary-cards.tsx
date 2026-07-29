@@ -1,83 +1,49 @@
 import { formatCurrencyUSD, formatNumber } from "@/lib/format";
+import type { ApprovedMetrics } from "@/lib/queries/purchase-orders";
 import type { PurchaseOrderListItem } from "@/lib/types";
 
 type PoSummaryCardsProps = {
   orders: PurchaseOrderListItem[];
+  approvedMetrics: ApprovedMetrics;
 };
 
 type PoListSummary = {
-  monthTotal: number;
-  monthOrderCount: number;
-  allTimeTotal: number;
-  pendingCount: number;
+  draftCount: number;
+  awaitingApprovalCount: number;
 };
 
-function amountOrZero(value: number | null | undefined): number {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return 0;
-  }
-
-  return value;
+function normalizeStatus(status: string): string {
+  return status.trim().toLowerCase();
 }
 
-function isPricedOrder(order: PurchaseOrderListItem): boolean {
-  return !order.hasUnknownLineCosts;
-}
-
-function isInCurrentCalendarMonth(poDate: string | null): boolean {
-  if (!poDate) {
-    return false;
-  }
-
-  const parsed = new Date(poDate);
-  if (Number.isNaN(parsed.getTime())) {
-    return false;
-  }
-
-  const now = new Date();
-  return (
-    parsed.getFullYear() === now.getFullYear() &&
-    parsed.getMonth() === now.getMonth()
-  );
-}
-
-function isPendingStatus(status: string): boolean {
+function isDraftStatus(status: string): boolean {
   const normalized = status.trim().toLowerCase();
-  return normalized === "draft" || normalized === "pending_approval";
+  return normalized === "draft";
+}
+
+function isAwaitingApproval(status: string): boolean {
+  const normalized = normalizeStatus(status);
+  return normalized === "pending_approval";
 }
 
 export function computePoListSummary(
   orders: PurchaseOrderListItem[]
 ): PoListSummary {
-  let monthTotal = 0;
-  let monthOrderCount = 0;
-  let allTimeTotal = 0;
-  let pendingCount = 0;
+  let draftCount = 0;
+  let awaitingApprovalCount = 0;
 
   for (const order of orders) {
-    if (isPricedOrder(order)) {
-      const amount = amountOrZero(order.totalAmount);
-      allTimeTotal += amount;
-
-      if (isInCurrentCalendarMonth(order.poDate)) {
-        monthTotal += amount;
-        monthOrderCount += 1;
-      }
-    } else if (isInCurrentCalendarMonth(order.poDate)) {
-      // Unpriced POs still count toward this month's order count.
-      monthOrderCount += 1;
+    if (isDraftStatus(order.status)) {
+      draftCount += 1;
     }
-
-    if (isPendingStatus(order.status)) {
-      pendingCount += 1;
+    if (isAwaitingApproval(order.status)) {
+      awaitingApprovalCount += 1;
     }
   }
 
   return {
-    monthTotal,
-    monthOrderCount,
-    allTimeTotal,
-    pendingCount,
+    draftCount,
+    awaitingApprovalCount,
   };
 }
 
@@ -121,31 +87,39 @@ function SummaryCard({
   );
 }
 
-export function PoSummaryCards({ orders }: PoSummaryCardsProps) {
+export function PoSummaryCards({ orders, approvedMetrics }: PoSummaryCardsProps) {
   const summary = computePoListSummary(orders);
 
   return (
-    <div className="mb-5 grid grid-cols-3 gap-5">
+    <div className="mb-5 grid grid-cols-4 gap-5">
       <SummaryCard
-        label="Total PO Value (This Month)"
-        value={formatCurrencyUSD(summary.monthTotal)}
-        subLabel={`${formatNumber(summary.monthOrderCount)} orders this month`}
+        label="Draft POs"
+        value={formatNumber(summary.draftCount)}
+        subLabel="Saved drafts awaiting submission"
         iconClass="ti-receipt"
         iconBg="bg-tbc-red-light"
         iconColor="text-tbc-red"
       />
       <SummaryCard
-        label="Total PO Value (All Time)"
-        value={formatCurrencyUSD(summary.allTimeTotal)}
-        subLabel="All purchase orders (US$)"
-        iconClass="ti-currency-dollar"
+        label="Awaiting approval"
+        value={formatNumber(summary.awaitingApprovalCount)}
+        subLabel="Pending approver decision"
+        iconClass="ti-hourglass"
         iconBg="bg-tbc-amber-light"
         iconColor="text-tbc-amber"
       />
       <SummaryCard
-        label="Pending Orders"
-        value={formatNumber(summary.pendingCount)}
-        subLabel="Draft or pending approval"
+        label="Approved this month"
+        value={formatNumber(approvedMetrics.approvedThisMonthCount)}
+        subLabel="Based on approval audit events"
+        iconClass="ti-check"
+        iconBg="bg-[#ECFDF5]"
+        iconColor="text-[#047857]"
+      />
+      <SummaryCard
+        label="Approved value this month"
+        value={formatCurrencyUSD(approvedMetrics.approvedValueThisMonth)}
+        subLabel="Value of approved orders this month"
         iconClass="ti-clock"
         iconBg="bg-[#E6F1FB]"
         iconColor="text-[#185FA5]"

@@ -24,6 +24,11 @@ type PoLineRow = {
   line_total: number | string | null;
 };
 
+export type ApprovedMetrics = {
+  approvedThisMonthCount: number;
+  approvedValueThisMonth: number;
+};
+
 function toQuantity(value: number | string | null | undefined): number {
   if (value === null || value === undefined || value === "") {
     return 0;
@@ -200,6 +205,68 @@ export async function getPurchaseOrderList(): Promise<PurchaseOrderListItem[]> {
       createdBy: order.created_by?.trim() || null,
     };
   });
+}
+
+export async function getApprovedMetricsThisMonth(): Promise<ApprovedMetrics> {
+  const supabase = createAdminClient();
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
+
+  const { data: approvals, error: approvalsError } = await supabase
+    .from("po_audit_log")
+    .select("po_id, created_at")
+    .eq("tenant_id", TENANT_ID)
+    .eq("action", "approved")
+    .gte("created_at", start)
+    .lt("created_at", end);
+
+  if (approvalsError) {
+    console.error("Failed to fetch monthly approval metrics:", approvalsError.message);
+    return { approvedThisMonthCount: 0, approvedValueThisMonth: 0 };
+  }
+
+  const poIds = Array.from(
+    new Set(
+      (approvals ?? [])
+        .map((row) => row.po_id)
+        .filter((value): value is string => typeof value === "string" && value.trim() !== "")
+    )
+  );
+
+  if (poIds.length === 0) {
+    return { approvedThisMonthCount: 0, approvedValueThisMonth: 0 };
+  }
+
+  const { data: orders, error: ordersError } = await supabase
+    .from("purchase_orders")
+    .select("id, total_amount")
+    .eq("tenant_id", TENANT_ID)
+    .in("id", poIds);
+
+  if (ordersError) {
+    console.error(
+      "Failed to fetch approved PO values for monthly metrics:",
+      ordersError.message
+    );
+    return { approvedThisMonthCount: poIds.length, approvedValueThisMonth: 0 };
+  }
+
+  let approvedValueThisMonth = 0;
+  for (const order of orders ?? []) {
+    const value =
+      order.total_amount === null || order.total_amount === undefined
+        ? null
+        : Number(order.total_amount);
+    if (value !== null && Number.isFinite(value)) {
+      approvedValueThisMonth += value;
+    }
+  }
+
+  return {
+    approvedThisMonthCount: poIds.length,
+    approvedValueThisMonth,
+  };
 }
 
 export async function getPurchaseOrderDocument(

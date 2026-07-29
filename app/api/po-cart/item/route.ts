@@ -1,4 +1,5 @@
 import {
+  coerceNullableNumber,
   coerceOptionalString,
   coercePositiveQuantity,
   requireUserEmail,
@@ -47,13 +48,14 @@ export async function PATCH(request: Request) {
       body,
       "supplierExternalId"
     );
+    const hasUnitPrice = Object.prototype.hasOwnProperty.call(body, "unitPrice");
     const hasOverride =
       Object.prototype.hasOwnProperty.call(body, "override") &&
       body.override != null;
 
-    if (!hasQuantity && !hasSupplier) {
+    if (!hasQuantity && !hasSupplier && !hasUnitPrice) {
       return NextResponse.json(
-        { error: "Provide quantity and/or supplierExternalId" },
+        { error: "Provide quantity, supplierExternalId, and/or unitPrice" },
         { status: 400 }
       );
     }
@@ -71,6 +73,17 @@ export async function PATCH(request: Request) {
         );
       }
       updates.quantity = quantity;
+    }
+
+    if (hasUnitPrice) {
+      const unitPrice = coerceNullableNumber(body.unitPrice);
+      if (unitPrice === null || unitPrice < 0) {
+        return NextResponse.json(
+          { error: "unitPrice must be a non-negative number" },
+          { status: 400 }
+        );
+      }
+      updates.unit_price = unitPrice;
     }
 
     if (hasSupplier) {

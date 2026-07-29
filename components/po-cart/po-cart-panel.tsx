@@ -281,7 +281,7 @@ export function PoCartPanel() {
               onClick={close}
               className="flex w-full items-center justify-center rounded-xl bg-[#CC2B2B] px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-[#B02626]"
             >
-              Review cart ({totalItems} item{totalItems === 1 ? "" : "s"})
+              Review and create POs ({totalItems} item{totalItems === 1 ? "" : "s"})
             </Link>
           </div>
         ) : null}

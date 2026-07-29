@@ -81,7 +81,7 @@ export function PoDetailActions({
           role="status"
           className="rounded-2xl border border-[#86EFAC] bg-[#F0FDF4] px-4 py-3 text-sm text-[#166534]"
         >
-          {submittedBanner} submitted for approval
+          {submittedBanner} sent for approval
         </div>
       ) : null}
       <section className="flex flex-wrap items-center gap-6 rounded-2xl bg-white px-6 py-4 shadow-card">

@@ -55,6 +55,7 @@ export function PoListCard({ order, userRole, userEmail }: PoListCardProps) {
   const [status, setStatus] = useState(order.status);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     setStatus(order.status);
@@ -66,18 +67,11 @@ export function PoListCard({ order, userRole, userEmail }: PoListCardProps) {
     order.createdBy
   );
 
-  const quick =
-    status === "draft" && canTransition("draft", "pending_approval")
-      ? { toStatus: "pending_approval" as const, label: "Submit for approval" }
-      : status === "pending_approval" &&
-          canTransition("pending_approval", "approved")
-        ? { toStatus: "approved" as const, label: "Approve" }
-        : null;
-
   const canSuppress = canTransition(status, "suppressed");
   const pdfUrl = `/api/purchase-orders/${order.id}/pdf`;
-  const approveBlocked =
-    quick?.toStatus === "approved" && Boolean(approveBlockReason);
+  const normalizedStatus = status.trim().toLowerCase();
+  const canReviewAndApprove =
+    normalizedStatus === "pending_approval" && !approveBlockReason;
 
   const metaParts = [
     order.supplierName?.trim() || "Supplier not specified",
@@ -88,13 +82,7 @@ export function PoListCard({ order, userRole, userEmail }: PoListCardProps) {
   const lineSummary = formatLineSummary(order.lines);
   const countsLabel = `${formatNumber(order.lineCount)} items - ${formatNumber(order.totalUnits)} units`;
 
-  async function runTransition(
-    toStatus: "pending_approval" | "approved" | "suppressed"
-  ) {
-    if (toStatus === "approved" && approveBlockReason) {
-      setError(approveBlockReason);
-      return;
-    }
+  async function runTransition(toStatus: "pending_approval" | "suppressed") {
 
     setIsSubmitting(true);
     setError(null);
@@ -136,6 +124,87 @@ export function PoListCard({ order, userRole, userEmail }: PoListCardProps) {
       setIsSubmitting(false);
     }
   }
+
+  async function sendToSupplier() {
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/purchase-orders/${order.id}/send`, {
+        method: "POST",
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        error?: string;
+      } | null;
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Failed to send purchase order");
+      }
+      setStatus("sent");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to send purchase order");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  const primaryAction = (() => {
+    if (normalizedStatus === "draft") {
+      return (
+        <button
+          type="button"
+          disabled={isSubmitting}
+          onClick={() => {
+            void runTransition("pending_approval");
+          }}
+          className="h-9 rounded-lg bg-[#CC2B2B] px-3 text-sm font-medium text-white transition-colors hover:bg-[#B02626] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isSubmitting ? "…" : "Send for approval"}
+        </button>
+      );
+    }
+    if (normalizedStatus === "pending_approval") {
+      if (canReviewAndApprove) {
+        return (
+          <Link
+            href={`/purchase-orders/${order.id}`}
+            className="inline-flex h-9 items-center rounded-lg bg-[#CC2B2B] px-3 text-sm font-medium text-white transition-colors hover:bg-[#B02626]"
+          >
+            Review and approve
+          </Link>
+        );
+      }
+      return (
+        <Link
+          href={`/purchase-orders/${order.id}`}
+          className="inline-flex h-9 items-center rounded-lg bg-[#374151] px-3 text-sm font-medium text-white transition-colors hover:bg-[#1F2937]"
+        >
+          View status
+        </Link>
+      );
+    }
+    if (normalizedStatus === "approved") {
+      return (
+        <button
+          type="button"
+          disabled={isSubmitting}
+          onClick={() => {
+            void sendToSupplier();
+          }}
+          className="h-9 rounded-lg bg-[#CC2B2B] px-3 text-sm font-medium text-white transition-colors hover:bg-[#B02626] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isSubmitting ? "Sending…" : "Send to supplier"}
+        </button>
+      );
+    }
+    return (
+      <Link
+        href={`/purchase-orders/${order.id}`}
+        className="inline-flex h-9 items-center rounded-lg bg-[#374151] px-3 text-sm font-medium text-white transition-colors hover:bg-[#1F2937]"
+      >
+        View PO
+      </Link>
+    );
+  })();
 
   return (
     <article className="flex flex-wrap items-center gap-6 rounded-2xl bg-white px-6 py-4 shadow-card">
@@ -179,43 +248,40 @@ export function PoListCard({ order, userRole, userEmail }: PoListCardProps) {
       </div>
 
       <div className="mt-0 flex flex-shrink-0 flex-wrap items-center gap-2 max-sm:mt-3 max-sm:w-full">
-        {quick ? (
+        {primaryAction}
+        <div className="relative">
           <button
             type="button"
-            disabled={isSubmitting || approveBlocked}
-            title={approveBlocked ? approveBlockReason ?? undefined : undefined}
-            onClick={() => {
-              void runTransition(quick.toStatus);
-            }}
-            className="h-9 rounded-lg bg-[#CC2B2B] px-3 text-sm font-medium text-white transition-colors hover:bg-[#B02626] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isSubmitting ? "…" : quick.label}
-          </button>
-        ) : null}
-
-        {canSuppress ? (
-          <button
-            type="button"
-            disabled={isSubmitting}
-            title="Suppress"
-            aria-label={`Suppress ${order.poNumber}`}
-            onClick={() => {
-              void runTransition("suppressed");
-            }}
+            aria-label={`More actions for ${order.poNumber}`}
+            onClick={() => setMenuOpen((open) => !open)}
             className={iconButtonClassName}
           >
-            <i className="ti ti-ban text-base" aria-hidden="true" />
+            <i className="ti ti-dots-vertical text-base" aria-hidden="true" />
           </button>
-        ) : null}
-
-        <a
-          href={pdfUrl}
-          title="Download PDF"
-          aria-label={`Download PDF for ${order.poNumber}`}
-          className={iconButtonClassName}
-        >
-          <i className="ti ti-download text-base" aria-hidden="true" />
-        </a>
+          {menuOpen ? (
+            <div className="absolute right-0 top-10 z-20 min-w-[11rem] rounded-lg border border-[#E5E7EB] bg-white py-1 shadow-card">
+              <a
+                href={pdfUrl}
+                className="block px-3 py-2 text-sm text-[#374151] hover:bg-[#F9FAFB]"
+              >
+                Download PDF
+              </a>
+              {canSuppress ? (
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    void runTransition("suppressed");
+                  }}
+                  className="block w-full px-3 py-2 text-left text-sm text-[#374151] hover:bg-[#F9FAFB] disabled:opacity-60"
+                >
+                  Suppress PO
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
 
         <Link
           href={`/purchase-orders/${order.id}`}

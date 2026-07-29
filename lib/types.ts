@@ -469,6 +469,15 @@ export type PurchaseOrderActionResult = {
   purchaseOrderId?: string;
 };
 
+export type PoCreationResult = {
+  supplierExternalId: string;
+  success: boolean;
+  purchaseOrderId?: string;
+  poNumber?: string;
+  status?: "draft" | "pending_approval";
+  error?: string;
+};
+
 export type PoCartItem = {
   id: string;
   tenantId: string;

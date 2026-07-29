@@ -39,7 +39,7 @@ function buildIntents(from: PoStatus): TransitionIntent[] {
     if (toStatus === "pending_approval") {
       return {
         toStatus,
-        label: "Submit for approval",
+        label: "Send for approval",
         variant: "primary",
         needsNote: false,
       };
@@ -47,7 +47,7 @@ function buildIntents(from: PoStatus): TransitionIntent[] {
     if (toStatus === "approved") {
       return {
         toStatus,
-        label: "Approve",
+        label: "Approve purchase order",
         variant: "primary",
         needsNote: false,
       };
@@ -70,7 +70,7 @@ function buildIntents(from: PoStatus): TransitionIntent[] {
     }
     return {
       toStatus,
-      label: from === "suppressed" ? "Revive as draft" : "Return to draft",
+      label: from === "suppressed" ? "Revive as draft" : "Return to buyer",
       variant: "ghost",
       needsNote: true,
     };
@@ -271,13 +271,17 @@ export function PoTransitionButtons({
       {pendingIntent ? (
         <div className="w-full min-w-[16rem] max-w-sm rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] p-3">
           <p className="text-xs font-medium text-[#374151]">
-            {pendingIntent.label} — optional reason
+            {pendingIntent.label}
           </p>
           <input
             type="text"
             value={note}
             onChange={(event) => setNote(event.target.value)}
-            placeholder="Reason (optional)"
+            placeholder={
+              pendingIntent.toStatus === "draft" && currentStatus === "pending_approval"
+                ? "Comment required"
+                : "Reason (optional)"
+            }
             className="mt-2 w-full rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm text-[#111111] focus:border-[#CC2B2B] focus:outline-none focus:ring-2 focus:ring-[#CC2B2B]/10"
           />
           <div className="mt-2 flex justify-end gap-2">
@@ -296,9 +300,20 @@ export function PoTransitionButtons({
               type="button"
               disabled={isSubmitting}
               onClick={() => {
+                const trimmed = note.trim();
+                if (
+                  pendingIntent.toStatus === "draft" &&
+                  currentStatus === "pending_approval" &&
+                  !trimmed
+                ) {
+                  setError(
+                    "A comment is required when returning a purchase order to the buyer."
+                  );
+                  return;
+                }
                 void runTransition(
                   pendingIntent.toStatus,
-                  note.trim() || null
+                  trimmed || null
                 );
               }}
               className={primaryClassName}

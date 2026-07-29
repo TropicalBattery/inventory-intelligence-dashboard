@@ -2,18 +2,85 @@ import {
   coerceOptionalString,
   requireUserEmail,
 } from "@/lib/po/cart-auth";
-import { logPoAudit } from "@/lib/po/approval";
-import { fetchUserCartItems, mapCartRow } from "@/lib/po/cart";
+import { getUserRole } from "@/lib/auth/roles";
+import { fetchUserCartItems, mapCartRow, type PoCartItemRow } from "@/lib/po/cart";
+import type { PoStatus } from "@/lib/po/approval";
 import {
-  computeLineTotal,
-  hasUnknownLineCosts,
-  sumKnownLineTotals,
-} from "@/lib/po/line-cost";
-import { generatePoNumber } from "@/lib/po/po-number";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { TENANT_ID } from "@/lib/tenant";
+  clearSupplierCartGroup,
+  createPurchaseOrderFromSupplierCartGroup,
+  PoWorkflowError,
+  transitionPurchaseOrder,
+} from "@/lib/po/workflow";
+import type { PoCreationResult } from "@/lib/types";
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
+
+type SaveMode = "draft" | "submit_for_approval";
+type GroupReadiness = "ready_for_approval" | "needs_pricing" | "supplier_required";
+
+type SupplierGroup = {
+  supplierExternalId: string | null;
+  rows: PoCartItemRow[];
+  hasInvalidQuantity: boolean;
+  hasMissingPrice: boolean;
+  readiness: GroupReadiness;
+  eligibleForDraft: boolean;
+  eligibleForApproval: boolean;
+};
+
+function classifyGroup(group: SupplierGroup): GroupReadiness {
+  if (!group.supplierExternalId) {
+    return "supplier_required";
+  }
+  if (group.hasMissingPrice) {
+    return "needs_pricing";
+  }
+  return "ready_for_approval";
+}
+
+function groupCartRows(rows: PoCartItemRow[]): SupplierGroup[] {
+  const map = new Map<string, PoCartItemRow[]>();
+  for (const row of rows) {
+    const key = row.supplier_external_id ?? "__UNASSIGNED__";
+    const list = map.get(key) ?? [];
+    list.push(row);
+    map.set(key, list);
+  }
+
+  const groups: SupplierGroup[] = [];
+  for (const [key, groupRows] of Array.from(map.entries())) {
+    const supplierExternalId = key === "__UNASSIGNED__" ? null : key;
+    const items = groupRows.map((row: PoCartItemRow) => mapCartRow(row));
+    const hasInvalidQuantity = items.some((item: { quantity: number }) => !(item.quantity > 0));
+    const hasMissingPrice = items.some(
+      (item: { unitPrice: number | null }) =>
+        item.unitPrice === null || !Number.isFinite(item.unitPrice)
+    );
+    const group: SupplierGroup = {
+      supplierExternalId,
+      rows: groupRows,
+      hasInvalidQuantity,
+      hasMissingPrice,
+      readiness: "supplier_required",
+      eligibleForDraft: false,
+      eligibleForApproval: false,
+    };
+    group.readiness = classifyGroup(group);
+    group.eligibleForDraft =
+      Boolean(group.supplierExternalId) && !group.hasInvalidQuantity;
+    group.eligibleForApproval =
+      Boolean(group.supplierExternalId) &&
+      !group.hasInvalidQuantity &&
+      !group.hasMissingPrice;
+    groups.push(group);
+  }
+
+  return groups.sort((left, right) => {
+    const a = left.supplierExternalId ?? "UNASSIGNED";
+    const b = right.supplierExternalId ?? "UNASSIGNED";
+    return a.localeCompare(b);
+  });
+}
 
 export async function POST(request: Request) {
   try {
@@ -22,175 +89,142 @@ export async function POST(request: Request) {
       return auth.error;
     }
 
-    const body = (await request.json()) as Record<string, unknown>;
-    const supplierExternalId = coerceOptionalString(body.supplierExternalId);
+    const body = (await request.json().catch(() => ({}))) as Record<
+      string,
+      unknown
+    >;
+    const legacySupplierExternalId = coerceOptionalString(body.supplierExternalId);
+    const requestedMode =
+      typeof body.saveMode === "string" ? body.saveMode.trim() : "";
+    const saveMode: SaveMode =
+      requestedMode === "submit_for_approval"
+        ? "submit_for_approval"
+        : "draft";
 
-    if (!supplierExternalId || supplierExternalId === "UNASSIGNED") {
-      return NextResponse.json(
-        {
-          error: "Assign a supplier to all items before submitting.",
-        },
-        { status: 400 }
-      );
-    }
+    const requestedSupplierIds = Array.isArray(body.supplierExternalIds)
+      ? body.supplierExternalIds
+          .map((value) => (typeof value === "string" ? value.trim() : ""))
+          .filter((value): value is string => Boolean(value))
+      : legacySupplierExternalId
+        ? [legacySupplierExternalId]
+        : [];
 
     const cartRows = await fetchUserCartItems(auth.email);
-    const matchingRows = cartRows.filter(
-      (row) => row.supplier_external_id === supplierExternalId
+    const grouped = groupCartRows(cartRows);
+    const scopedGroups = grouped.filter((group) =>
+      requestedSupplierIds.length === 0
+        ? true
+        : group.supplierExternalId
+          ? requestedSupplierIds.includes(group.supplierExternalId)
+          : false
     );
-    const items = matchingRows.map((row) => mapCartRow(row));
 
-    if (items.length === 0) {
+    if (scopedGroups.length === 0) {
       return NextResponse.json(
-        { error: "No cart items for that supplier" },
+        { error: "No cart items matched the selected supplier groups." },
         { status: 400 }
       );
     }
 
-    const supabase = createAdminClient();
-    const { data: supplier } = await supabase
-      .from("suppliers")
-      .select("external_id, supplier_code, name")
-      .eq("tenant_id", TENANT_ID)
-      .eq("external_id", supplierExternalId)
-      .maybeSingle();
+    const actorRole = await getUserRole(auth.email);
+    const results: PoCreationResult[] = [];
+    const skipped: Array<{ supplierExternalId: string; reason: string }> = [];
+    let createdCount = 0;
+    let sentForApprovalCount = 0;
 
-    const skuList = items.map((item) => item.sku);
-    const { data: products } = await supabase
-      .from("products")
-      .select("sku, external_id")
-      .eq("tenant_id", TENANT_ID)
-      .in("sku", skuList);
+    for (const group of scopedGroups) {
+      const supplierExternalId = group.supplierExternalId ?? "UNASSIGNED";
+      const eligible =
+        saveMode === "submit_for_approval"
+          ? group.eligibleForApproval
+          : group.eligibleForDraft;
 
-    const productExternalBySku = new Map<string, string | null>();
-    for (const row of (products ?? []) as Array<{
-      sku: string;
-      external_id: string | null;
-    }>) {
-      productExternalBySku.set(row.sku, row.external_id);
-    }
+      if (!eligible || !group.supplierExternalId) {
+        let reason = "Group is not eligible for this action.";
+        if (!group.supplierExternalId) {
+          reason = "Supplier required.";
+        } else if (group.hasInvalidQuantity) {
+          reason = "Invalid quantity on one or more lines.";
+        } else if (saveMode === "submit_for_approval" && group.hasMissingPrice) {
+          reason = "Pricing is incomplete.";
+        }
+        skipped.push({ supplierExternalId, reason });
+        results.push({
+          supplierExternalId,
+          success: false,
+          error: reason,
+        });
+        continue;
+      }
 
-    const poNumber = await generatePoNumber();
-    const now = new Date().toISOString();
-    const lineTotals = items.map((item) => ({
-      unitCost: item.unitPrice,
-      lineTotal: computeLineTotal(item.quantity, item.unitPrice),
-    }));
-    const unknownPrices = hasUnknownLineCosts(lineTotals);
-    const totalAmount = unknownPrices ? null : sumKnownLineTotals(lineTotals);
+      try {
+        const created = await createPurchaseOrderFromSupplierCartGroup({
+          supplierExternalId: group.supplierExternalId,
+          createdByEmail: auth.email,
+          clearCartOnSuccess: false,
+        });
 
-    const { data: purchaseOrder, error: orderError } = await supabase
-      .from("purchase_orders")
-      .insert({
-        tenant_id: TENANT_ID,
-        external_id: poNumber,
-        po_number: poNumber,
-        supplier_external_id: supplierExternalId,
-        supplier_code:
-          (supplier as { supplier_code?: string | null } | null)
-            ?.supplier_code ?? null,
-        po_date: now,
-        status: "draft",
-        total_amount: totalAmount,
-        memo: null,
-        source_system: "po-cart",
-        source_updated_at: now,
-        created_by: auth.email,
-      })
-      .select("id, po_number")
-      .single();
+        let finalStatus: PoStatus = "draft";
+        if (saveMode === "submit_for_approval") {
+          const transitioned = await transitionPurchaseOrder({
+            purchaseOrderId: created.purchaseOrderId,
+            toStatus: "pending_approval",
+            actorUserId: auth.email,
+            actorEmail: auth.email,
+            actorRole,
+          });
+          finalStatus = transitioned.status;
+          sentForApprovalCount += 1;
+        }
 
-    if (orderError || !purchaseOrder) {
-      return NextResponse.json(
-        {
-          error: orderError?.message ?? "Failed to create purchase order",
-        },
-        { status: 500 }
-      );
-    }
-
-    const lineRows = matchingRows.map((row, index) => {
-      const item = items[index]!;
-      const lineIndex = String(index + 1).padStart(3, "0");
-      const lineTotal = computeLineTotal(item.quantity, item.unitPrice);
-
-      return {
-        tenant_id: TENANT_ID,
-        external_id: `${poNumber}-${lineIndex}`,
-        po_external_id: poNumber,
-        po_number: poNumber,
-        product_external_id: productExternalBySku.get(item.sku) ?? null,
-        sku: item.sku,
-        quantity_ordered: item.quantity,
-        unit_cost: item.unitPrice,
-        line_total: lineTotal,
-        source_system: "po-cart",
-        source_updated_at: now,
-        lock_override_reason: row.lock_override_reason ?? null,
-        lock_overridden_by: row.lock_overridden_by ?? null,
-        lock_overridden_at: row.lock_overridden_at ?? null,
-        lock_original_vendor: row.lock_original_vendor ?? null,
-      };
-    });
-
-    const { error: linesError } = await supabase
-      .from("purchase_order_lines")
-      .insert(lineRows);
-
-    if (linesError) {
-      await supabase.from("purchase_orders").delete().eq("id", purchaseOrder.id);
-      return NextResponse.json(
-        {
-          error: linesError.message ?? "Failed to create purchase order lines",
-        },
-        { status: 500 }
-      );
-    }
-
-    try {
-      await logPoAudit({
-        poId: purchaseOrder.id,
-        poNumber: purchaseOrder.po_number ?? poNumber,
-        action: "created",
-        fromStatus: null,
-        toStatus: "draft",
-        actor: auth.email,
-        note: null,
-      });
-    } catch (auditError) {
-      console.error(
-        "PO created but audit log failed:",
-        auditError,
-        purchaseOrder.id
-      );
-    }
-
-    const { error: clearError } = await supabase
-      .from("po_cart_items")
-      .delete()
-      .eq("tenant_id", TENANT_ID)
-      .eq("created_by", auth.email)
-      .eq("supplier_external_id", supplierExternalId);
-
-    if (clearError) {
-      console.error(
-        "PO created but cart clear failed:",
-        clearError.message,
-        purchaseOrder.id
-      );
+        await clearSupplierCartGroup(auth.email, group.supplierExternalId);
+        createdCount += 1;
+        results.push({
+          supplierExternalId: group.supplierExternalId,
+          success: true,
+          purchaseOrderId: created.purchaseOrderId,
+          poNumber: created.poNumber,
+          status: finalStatus === "pending_approval" ? "pending_approval" : "draft",
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Failed to create PO.";
+        results.push({
+          supplierExternalId: group.supplierExternalId,
+          success: false,
+          error: message,
+        });
+      }
     }
 
     revalidatePath("/purchase-orders");
+    revalidatePath("/purchase-orders/review");
     revalidatePath("/reorder");
+    revalidatePath("/dashboard");
+
+    const remainingGroups = scopedGroups.length - createdCount;
+    const processedGroups = results.filter((result) => result.success).length;
 
     return NextResponse.json({
-      poId: purchaseOrder.id,
-      poNumber: purchaseOrder.po_number ?? poNumber,
+      saveMode,
+      results,
+      summary: {
+        totalGroups: scopedGroups.length,
+        processedGroups,
+        skippedGroups: skipped.length,
+        remainingGroups,
+        createdCount,
+        sentForApprovalCount,
+      },
+      skipped,
     });
   } catch (error) {
+    if (error instanceof PoWorkflowError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     console.error("POST /api/po-cart/submit failed:", error);
     return NextResponse.json(
-      { error: "Failed to submit cart group" },
+      { error: "Failed to process cart groups" },
       { status: 500 }
     );
   }
