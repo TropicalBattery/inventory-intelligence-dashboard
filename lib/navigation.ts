@@ -2,6 +2,8 @@ export type NavItem = {
   href: string;
   label: string;
   iconClass: string;
+  /** When true, sidebar shows this item only for approvers. */
+  approverOnly?: boolean;
 };
 
 export const navItems: NavItem[] = [
@@ -21,6 +23,12 @@ export const navItems: NavItem[] = [
   { href: "/exceptions", label: "Exceptions", iconClass: "ti-alert-octagon" },
   { href: "/reference-data", label: "Reference Data", iconClass: "ti-database" },
   {
+    href: "/users",
+    label: "Users",
+    iconClass: "ti-users",
+    approverOnly: true,
+  },
+  {
     href: "/connector-health",
     label: "Connector Health",
     iconClass: "ti-activity",
@@ -35,6 +43,7 @@ export const pageTitles: Record<string, string> = {
   "/inbound-containers": "Inbound Containers",
   "/exceptions": "Data exceptions",
   "/reference-data": "Reference Data",
+  "/users": "Users",
   "/connector-health": "Connector Health",
 };
 
@@ -48,6 +57,7 @@ export const pageSubtitles: Record<string, string> = {
   "/exceptions":
     "Items needing data cleanup before their numbers can be trusted",
   "/reference-data": "Maintain supplier and item reference data",
+  "/users": "Manage roles and password resets",
   "/connector-health": "Monitor connector sync status and health",
 };
 

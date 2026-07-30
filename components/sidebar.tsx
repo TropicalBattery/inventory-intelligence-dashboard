@@ -2,27 +2,27 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { usePathname } from "next/navigation";
+import { useMemo } from "react";
+import { AccountPopover } from "@/components/account-popover";
+import type { UserRole } from "@/lib/auth/role-guards";
 import { navItems } from "@/lib/navigation";
-import { createClient } from "@/lib/supabase/client";
 
 type SidebarProps = {
   userEmail: string;
+  userRole: UserRole;
 };
 
-export function Sidebar({ userEmail }: SidebarProps) {
+export function Sidebar({ userEmail, userRole }: SidebarProps) {
   const pathname = usePathname();
-  const router = useRouter();
-  const [loggingOut, setLoggingOut] = useState(false);
 
-  async function handleLogout() {
-    setLoggingOut(true);
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/login");
-    router.refresh();
-  }
+  const visibleNavItems = useMemo(
+    () =>
+      navItems.filter(
+        (item) => !item.approverOnly || userRole === "approver"
+      ),
+    [userRole]
+  );
 
   return (
     <aside className="fixed inset-y-0 left-0 z-30 flex w-64 flex-col bg-tbc-sidebar text-tbc-sidebar-text">
@@ -44,7 +44,7 @@ export function Sidebar({ userEmail }: SidebarProps) {
           Navigation
         </p>
         <div className="space-y-1">
-          {navItems.map((item) => {
+          {visibleNavItems.map((item) => {
             const isActive =
               pathname === item.href ||
               pathname.startsWith(`${item.href}/`);
@@ -74,22 +74,8 @@ export function Sidebar({ userEmail }: SidebarProps) {
         </div>
       </nav>
 
-      <div className="mt-auto flex w-full items-center justify-between border-t border-[#1F1F1F] px-4 py-3">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="max-w-[140px] truncate text-xs font-medium text-[#E5E5E5]">
-            {userEmail}
-          </span>
-        </div>
-        <button
-          type="button"
-          onClick={handleLogout}
-          disabled={loggingOut}
-          title="Sign out"
-          aria-label="Sign out"
-          className="cursor-pointer rounded-lg p-1.5 text-[#555555] transition-all duration-150 hover:bg-[#1F1F1F] hover:text-[#CC2B2B] disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <i className="ti ti-logout text-base" aria-hidden="true" />
-        </button>
+      <div className="mt-auto border-t border-[#1F1F1F] px-3 py-3">
+        <AccountPopover userEmail={userEmail} userRole={userRole} />
       </div>
     </aside>
   );

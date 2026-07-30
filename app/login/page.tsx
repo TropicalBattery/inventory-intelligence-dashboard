@@ -3,17 +3,21 @@
 import Image from "next/image";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import { getUpdatePasswordRedirectUrl } from "@/lib/auth/site-url";
 import { createClient } from "@/lib/supabase/client";
+
+type LoginMode = "sign-in" | "forgot" | "forgot-sent";
 
 export default function LoginPage() {
   const router = useRouter();
+  const [mode, setMode] = useState<LoginMode>("sign-in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSignIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setLoading(true);
@@ -32,6 +36,38 @@ export default function LoginPage() {
 
     router.push("/dashboard");
     router.refresh();
+  }
+
+  async function handleForgotSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    try {
+      const redirectTo = getUpdatePasswordRedirectUrl();
+      const supabase = createClient();
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+        email.trim(),
+        { redirectTo }
+      );
+
+      if (resetError) {
+        setError(
+          resetError.message.includes("rate") ||
+            resetError.status === 429
+            ? "Too many requests. Please wait a moment and try again."
+            : "Unable to send a reset link right now. Please try again."
+        );
+        setLoading(false);
+        return;
+      }
+
+      setMode("forgot-sent");
+      setLoading(false);
+    } catch {
+      setError("Unable to send a reset link right now. Please try again.");
+      setLoading(false);
+    }
   }
 
   return (
@@ -73,106 +109,232 @@ export default function LoginPage() {
             <div className="mb-5 mt-5 border-t border-[#F3F4F6]" />
           </div>
 
-          <h1 className="mb-1 text-xl font-bold text-[#111111]">
-            Sign in to your account
-          </h1>
-          <p className="mb-6 text-sm text-[#6B7280]">
-            Enter your credentials to continue.
-          </p>
+          {mode === "sign-in" ? (
+            <>
+              <h1 className="mb-1 text-xl font-bold text-[#111111]">
+                Sign in to your account
+              </h1>
+              <p className="mb-6 text-sm text-[#6B7280]">
+                Enter your credentials to continue.
+              </p>
 
-          <form onSubmit={handleSubmit}>
-            <div className="mb-4">
-              <label
-                htmlFor="email"
-                className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-[#6B7280]"
-              >
-                Email address
-              </label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                required
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                className="w-full rounded-xl border-[1.5px] border-[#E5E7EB] bg-[#F9FAFB] px-4 py-3 text-sm text-[#111111] transition-all focus:border-[#CC2B2B] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#CC2B2B]/10"
-                placeholder="you@company.com"
-              />
-            </div>
+              <form onSubmit={handleSignIn}>
+                <div className="mb-4">
+                  <label
+                    htmlFor="email"
+                    className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-[#6B7280]"
+                  >
+                    Email address
+                  </label>
+                  <input
+                    id="email"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    required
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    className="w-full rounded-xl border-[1.5px] border-[#E5E7EB] bg-[#F9FAFB] px-4 py-3 text-sm text-[#111111] transition-all focus:border-[#CC2B2B] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#CC2B2B]/10"
+                    placeholder="you@company.com"
+                  />
+                </div>
 
-            <div className="mb-2">
-              <label
-                htmlFor="password"
-                className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-[#6B7280]"
-              >
-                Password
-              </label>
-              <div className="relative">
-                <input
-                  id="password"
-                  name="password"
-                  type={showPassword ? "text" : "password"}
-                  autoComplete="current-password"
-                  required
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  className="w-full rounded-xl border-[1.5px] border-[#E5E7EB] bg-[#F9FAFB] py-3 pl-4 pr-11 text-sm text-[#111111] transition-all focus:border-[#CC2B2B] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#CC2B2B]/10"
-                  placeholder="Enter your password"
-                />
+                <div className="mb-2">
+                  <label
+                    htmlFor="password"
+                    className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-[#6B7280]"
+                  >
+                    Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="password"
+                      name="password"
+                      type={showPassword ? "text" : "password"}
+                      autoComplete="current-password"
+                      required
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      className="w-full rounded-xl border-[1.5px] border-[#E5E7EB] bg-[#F9FAFB] py-3 pl-4 pr-11 text-sm text-[#111111] transition-all focus:border-[#CC2B2B] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#CC2B2B]/10"
+                      placeholder="Enter your password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((visible) => !visible)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9CA3AF] transition-colors hover:text-[#6B7280]"
+                      aria-label={
+                        showPassword ? "Hide password" : "Show password"
+                      }
+                    >
+                      <i
+                        className={`ti ${showPassword ? "ti-eye-off" : "ti-eye"} text-lg`}
+                        aria-hidden="true"
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setError(null);
+                      setMode("forgot");
+                    }}
+                    className="text-sm font-medium text-[#CC2B2B] transition-colors hover:text-[#B02626]"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+
+                {error ? (
+                  <div
+                    role="alert"
+                    className="mb-1 mt-3 flex items-center gap-2 rounded-xl border border-[#FCA5A5] bg-[#FDF2F2] px-4 py-3 text-sm text-[#CC2B2B]"
+                  >
+                    <i
+                      className="ti ti-alert-circle text-base"
+                      aria-hidden="true"
+                    />
+                    <span>{error}</span>
+                  </div>
+                ) : null}
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  style={{
+                    background:
+                      "linear-gradient(135deg, #CC2B2B 0%, #991f1f 100%)",
+                  }}
+                  className={`mt-6 flex w-full items-center justify-center gap-2 rounded-xl border-none py-3 text-sm font-semibold text-white transition-opacity duration-150 hover:opacity-90 ${
+                    loading ? "cursor-not-allowed opacity-70" : ""
+                  }`}
+                >
+                  {loading ? (
+                    <>
+                      <i
+                        className="ti ti-loader-2 animate-spin text-base"
+                        aria-hidden="true"
+                      />
+                      Signing in...
+                    </>
+                  ) : (
+                    <>
+                      <i className="ti ti-login text-base" aria-hidden="true" />
+                      Sign in
+                    </>
+                  )}
+                </button>
+              </form>
+            </>
+          ) : null}
+
+          {mode === "forgot" ? (
+            <>
+              <h1 className="mb-1 text-xl font-bold text-[#111111]">
+                Reset your password
+              </h1>
+              <p className="mb-6 text-sm text-[#6B7280]">
+                Enter your email and we&apos;ll send a reset link if an account
+                exists.
+              </p>
+
+              <form onSubmit={handleForgotSubmit}>
+                <div className="mb-4">
+                  <label
+                    htmlFor="forgot-email"
+                    className="mb-1.5 block text-xs font-semibold uppercase tracking-widest text-[#6B7280]"
+                  >
+                    Email address
+                  </label>
+                  <input
+                    id="forgot-email"
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    required
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    className="w-full rounded-xl border-[1.5px] border-[#E5E7EB] bg-[#F9FAFB] px-4 py-3 text-sm text-[#111111] transition-all focus:border-[#CC2B2B] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#CC2B2B]/10"
+                    placeholder="you@company.com"
+                  />
+                </div>
+
+                {error ? (
+                  <div
+                    role="alert"
+                    className="mb-1 mt-3 flex items-center gap-2 rounded-xl border border-[#FCA5A5] bg-[#FDF2F2] px-4 py-3 text-sm text-[#CC2B2B]"
+                  >
+                    <i
+                      className="ti ti-alert-circle text-base"
+                      aria-hidden="true"
+                    />
+                    <span>{error}</span>
+                  </div>
+                ) : null}
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  style={{
+                    background:
+                      "linear-gradient(135deg, #CC2B2B 0%, #991f1f 100%)",
+                  }}
+                  className={`mt-6 flex w-full items-center justify-center gap-2 rounded-xl border-none py-3 text-sm font-semibold text-white transition-opacity duration-150 hover:opacity-90 ${
+                    loading ? "cursor-not-allowed opacity-70" : ""
+                  }`}
+                >
+                  {loading ? (
+                    <>
+                      <i
+                        className="ti ti-loader-2 animate-spin text-base"
+                        aria-hidden="true"
+                      />
+                      Sending...
+                    </>
+                  ) : (
+                    "Send reset link"
+                  )}
+                </button>
+
                 <button
                   type="button"
-                  onClick={() => setShowPassword((visible) => !visible)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9CA3AF] transition-colors hover:text-[#6B7280]"
-                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  onClick={() => {
+                    setError(null);
+                    setMode("sign-in");
+                  }}
+                  className="mt-4 w-full text-center text-sm font-medium text-[#6B7280] transition-colors hover:text-[#111111]"
                 >
-                  <i
-                    className={`ti ${showPassword ? "ti-eye-off" : "ti-eye"} text-lg`}
-                    aria-hidden="true"
-                  />
+                  Back to sign in
                 </button>
-              </div>
-            </div>
+              </form>
+            </>
+          ) : null}
 
-            {error ? (
+          {mode === "forgot-sent" ? (
+            <>
+              <h1 className="mb-1 text-xl font-bold text-[#111111]">
+                Check your email
+              </h1>
               <div
-                role="alert"
-                className="mb-1 mt-3 flex items-center gap-2 rounded-xl border border-[#FCA5A5] bg-[#FDF2F2] px-4 py-3 text-sm text-[#CC2B2B]"
+                role="status"
+                className="mt-4 rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] px-4 py-3 text-sm text-[#374151]"
               >
-                <i
-                  className="ti ti-alert-circle text-base"
-                  aria-hidden="true"
-                />
-                <span>{error}</span>
+                If that email has an account, a reset link is on its way.
               </div>
-            ) : null}
-
-            <button
-              type="submit"
-              disabled={loading}
-              style={{
-                background: "linear-gradient(135deg, #CC2B2B 0%, #991f1f 100%)",
-              }}
-              className={`mt-6 flex w-full items-center justify-center gap-2 rounded-xl border-none py-3 text-sm font-semibold text-white transition-opacity duration-150 hover:opacity-90 ${
-                loading ? "cursor-not-allowed opacity-70" : ""
-              }`}
-            >
-              {loading ? (
-                <>
-                  <i
-                    className="ti ti-loader-2 animate-spin text-base"
-                    aria-hidden="true"
-                  />
-                  Signing in...
-                </>
-              ) : (
-                <>
-                  <i className="ti ti-login text-base" aria-hidden="true" />
-                  Sign in
-                </>
-              )}
-            </button>
-          </form>
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setMode("sign-in");
+                }}
+                className="mt-6 w-full text-center text-sm font-medium text-[#CC2B2B] transition-colors hover:text-[#B02626]"
+              >
+                Back to sign in
+              </button>
+            </>
+          ) : null}
 
           <div className="mt-6 border-t border-[#F3F4F6] pt-5 text-center text-xs text-[#9CA3AF]">
             <p>Tropical Battery Company Limited</p>

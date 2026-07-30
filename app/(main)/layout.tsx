@@ -25,7 +25,9 @@ export default async function MainLayout({
   return (
     <PoCartProvider userRole={userRole}>
       <AppToastProvider>
-        <AppShell userEmail={user.email ?? "Unknown user"}>{children}</AppShell>
+        <AppShell userEmail={user.email ?? "Unknown user"} userRole={userRole}>
+          {children}
+        </AppShell>
         <AiChatProvider />
       </AppToastProvider>
     </PoCartProvider>
