@@ -1,9 +1,14 @@
 import { DashboardBottomSection } from "@/components/dashboard/dashboard-bottom-section";
 import { DashboardCharts } from "@/components/dashboard/dashboard-charts";
 import { DashboardMetricCards } from "@/components/dashboard/dashboard-metric-cards";
+import { DashboardMovementCard } from "@/components/dashboard/dashboard-movement-card";
 import { SeasonalIntelligenceCard } from "@/components/dashboard/seasonal-intelligence-card";
 import { getRecentSyncRuns } from "@/lib/queries/connector-health";
 import { getDashboardStats } from "@/lib/queries/dashboard";
+import {
+  getInventoryTrend,
+  getMonthlySalesTrend,
+} from "@/lib/queries/dashboard-trends";
 import { getDataExceptions } from "@/lib/queries/exceptions";
 import { getPurchaseOrderList } from "@/lib/queries/purchase-orders";
 import { getLatestSeasonalIntelligence } from "@/lib/seasonality/service";
@@ -54,14 +59,23 @@ function buildSyncActivity(syncRuns: ConnectorSyncStatus[]) {
 }
 
 export default async function DashboardPage() {
-  const [stats, orders, syncRuns, seasonalIntelligence, exceptions] =
-    await Promise.all([
-      getDashboardStats(),
-      getPurchaseOrderList(),
-      getRecentSyncRuns(),
-      getLatestSeasonalIntelligence(),
-      getDataExceptions(),
-    ]);
+  const [
+    stats,
+    orders,
+    syncRuns,
+    seasonalIntelligence,
+    exceptions,
+    salesTrend,
+    inventoryTrend,
+  ] = await Promise.all([
+    getDashboardStats(),
+    getPurchaseOrderList(),
+    getRecentSyncRuns(),
+    getLatestSeasonalIntelligence(),
+    getDataExceptions(),
+    getMonthlySalesTrend(),
+    getInventoryTrend(),
+  ]);
 
   return (
     <div className="space-y-5">
@@ -75,6 +89,11 @@ export default async function DashboardPage() {
       />
 
       <SeasonalIntelligenceCard initialRecord={seasonalIntelligence} />
+
+      <DashboardMovementCard
+        salesTrend={salesTrend}
+        inventoryTrend={inventoryTrend}
+      />
 
       <DashboardCharts
         statusData={buildStatusData(stats.statusCounts)}

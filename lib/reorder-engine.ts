@@ -650,6 +650,8 @@ export function buildReorderRecommendation(
     dataGaps,
     suggestedQtyZeroReason,
     seasonality: row.seasonality ?? null,
+    avgUnits6mo: row.avg_units_6mo ?? null,
+    avgUnits12mo: row.avg_units_12mo ?? null,
     openPoQty: 0,
     openPoRefs: [],
     inbound: null,

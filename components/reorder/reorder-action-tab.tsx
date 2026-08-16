@@ -120,7 +120,9 @@ type FilterBarSort =
   | "qty-available-asc"
   | "suggested-qty-desc";
 
-const COLLAPSED_COLUMN_COUNT = 11;
+const COLLAPSED_COLUMN_COUNT = 12;
+
+type AvgMovementWindow = 6 | 12;
 
 const SIGNALS_COLUMN_CLASS = "w-14 px-2 text-center";
 /** Room for cover pill + inbound-relief cue ("ETA passed") on one line. */
@@ -361,6 +363,71 @@ function SuggestedQtyCell({ rec }: { rec: ReorderRecommendation }) {
     >
       {formatSuggestedQty(rec.suggestedQtyRounded)}
     </span>
+  );
+}
+
+function formatAvgMonthlyUnits(value: number | null): string {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+  return value.toFixed(1);
+}
+
+function AvgMonthlyCell({
+  rec,
+  windowMonths,
+}: {
+  rec: ReorderRecommendation;
+  windowMonths: AvgMovementWindow;
+}) {
+  const value = windowMonths === 6 ? rec.avgUnits6mo : rec.avgUnits12mo;
+  return (
+    <span className="tabular-nums text-slate-900">
+      {formatAvgMonthlyUnits(value)}
+    </span>
+  );
+}
+
+function AvgMovementWindowToggle({
+  value,
+  onChange,
+}: {
+  value: AvgMovementWindow;
+  onChange: (next: AvgMovementWindow) => void;
+}) {
+  const segmentClass = (active: boolean) =>
+    `rounded px-2 py-1 text-xs font-medium transition-colors ${
+      active
+        ? "bg-white text-slate-900 shadow-sm"
+        : "text-slate-500 hover:text-slate-700"
+    }`;
+
+  return (
+    <div
+      className="inline-flex items-center gap-2"
+      role="group"
+      aria-label="Average monthly movement window"
+    >
+      <span className="text-xs text-slate-500">Avg / mo</span>
+      <div className="inline-flex rounded-md bg-slate-100 p-0.5">
+        <button
+          type="button"
+          className={segmentClass(value === 6)}
+          aria-pressed={value === 6}
+          onClick={() => onChange(6)}
+        >
+          6 mo
+        </button>
+        <button
+          type="button"
+          className={segmentClass(value === 12)}
+          aria-pressed={value === 12}
+          onClick={() => onChange(12)}
+        >
+          12 mo
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -742,6 +809,8 @@ export function ReorderActionTab({
     useState(false);
   const [isPending, setIsPending] = useState(false);
   const [isExporting, setIsExporting] = useState<"csv" | "pdf" | null>(null);
+  const [avgMovementWindow, setAvgMovementWindow] =
+    useState<AvgMovementWindow>(6);
   const { addItems, open: openPoCart } = usePoCart();
 
   const currentViewFilters = useMemo<ReorderActionViewFilters>(
@@ -1427,7 +1496,14 @@ export function ReorderActionTab({
           </div>
         ) : null}
 
-        <Card className="mt-4 w-full max-w-full min-w-0 overflow-visible rounded-2xl p-0">
+        <div className="mt-4 flex items-center justify-end">
+          <AvgMovementWindowToggle
+            value={avgMovementWindow}
+            onChange={setAvgMovementWindow}
+          />
+        </div>
+
+        <Card className="mt-2 w-full max-w-full min-w-0 overflow-visible rounded-2xl p-0">
         {sortedMainRows.length === 0 ? (
           <div className="px-6 py-10 text-center text-sm text-slate-500">
             No rows match the current filters.
@@ -1493,6 +1569,9 @@ export function ReorderActionTab({
                   align="right"
                   className="w-20 px-2 !whitespace-normal"
                 />
+                <TableHead className="w-20 px-2 text-right !whitespace-normal">
+                  Avg / mo ({avgMovementWindow})
+                </TableHead>
                 <SortableHeader
                   label="Supplier"
                   sortKey="supplierName"
@@ -1594,6 +1673,12 @@ export function ReorderActionTab({
                       <TableCell className="w-20 px-2 text-right tabular-nums">
                         <SuggestedQtyCell rec={rec} />
                       </TableCell>
+                      <TableCell className="w-20 px-2 text-right tabular-nums whitespace-nowrap">
+                        <AvgMonthlyCell
+                          rec={rec}
+                          windowMonths={avgMovementWindow}
+                        />
+                      </TableCell>
                       <TableCell
                         className={`${SUPPLIER_COLUMN_CLASS} w-28 truncate px-2`}
                         title={rec.supplierExternalId ?? undefined}
@@ -1642,7 +1727,7 @@ export function ReorderActionTab({
             </TableBody>
           </Table>
         )}
-      </Card>
+        </Card>
       </div>
 
       {showNoDemandItems && sortedNoDemandRows.length > 0 ? (
@@ -1672,6 +1757,9 @@ export function ReorderActionTab({
                   </TableHead>
                   <TableHead className="w-20 px-2 text-right !whitespace-normal">
                     Suggested Qty
+                  </TableHead>
+                  <TableHead className="w-20 px-2 text-right !whitespace-normal">
+                    Avg / mo ({avgMovementWindow})
                   </TableHead>
                   <TableHead className={`${SUPPLIER_COLUMN_CLASS} w-28 px-2`}>
                     Supplier
@@ -1743,6 +1831,12 @@ export function ReorderActionTab({
                         </TableCell>
                         <TableCell className="w-20 px-2 text-right tabular-nums">
                           <SuggestedQtyCell rec={rec} />
+                        </TableCell>
+                        <TableCell className="w-20 px-2 text-right tabular-nums whitespace-nowrap">
+                          <AvgMonthlyCell
+                            rec={rec}
+                            windowMonths={avgMovementWindow}
+                          />
                         </TableCell>
                         <TableCell
                           className={`${SUPPLIER_COLUMN_CLASS} w-28 truncate px-2`}

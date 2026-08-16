@@ -44,7 +44,7 @@ const TABLE_COLUMNS: TableColumn[] = [
 ];
 
 function formatCurrency(value: number): string {
-  return `J$${value.toLocaleString("en-JM", {
+  return `US$${value.toLocaleString("en-JM", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;

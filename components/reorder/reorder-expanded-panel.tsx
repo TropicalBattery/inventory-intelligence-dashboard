@@ -9,7 +9,7 @@ import { PoStatusBadge } from "@/components/po/po-status-badge";
 import { SeasonalWarningBadge } from "@/components/reorder/seasonal-warning-badge";
 import { AiFormattedText } from "@/components/reorder/ai-formatted-text";
 import { useAppToast } from "@/components/ui/AppToast";
-import { formatCurrencyJMD, formatNumber } from "@/lib/format";
+import { formatCurrencyJMD, formatCurrencyUSD, formatNumber } from "@/lib/format";
 import { formatCasesHelper, parseUom } from "@/lib/format/uom";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import type { PipelineBreakdown } from "@/lib/pipeline-breakdown";
@@ -365,7 +365,7 @@ function formatSupplierUnitPrice(unitPrice: number | null | undefined): string {
     return "-";
   }
 
-  return formatCurrencyJMD(unitPrice);
+  return formatCurrencyUSD(unitPrice);
 }
 
 function getReliabilityBadgeClasses(
@@ -1236,7 +1236,7 @@ export function ReorderExpandedPanel({
                 <div className="sticky top-0 z-10 grid grid-cols-[minmax(10rem,1.2fr)_6rem_7rem_8rem_7rem_6rem_5.5rem] border-b border-[#E5E7EB] bg-[#F9FAFB] px-4 py-2.5 text-xs font-semibold uppercase tracking-widest text-[#6B7280]">
                   <span>Supplier Name</span>
                   <span className="text-right">Lead Time</span>
-                  <span className="text-right">Unit Price (J$)</span>
+                  <span className="text-right">Unit Price (US$)</span>
                   <span>Reliability</span>
                   <span>Region</span>
                   <span className="text-right">Min Order</span>

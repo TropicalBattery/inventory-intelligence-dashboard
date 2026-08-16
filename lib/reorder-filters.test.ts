@@ -71,6 +71,8 @@ function makeRec(
     dataGaps: [],
     suggestedQtyZeroReason: null,
     seasonality: null,
+    avgUnits6mo: null,
+    avgUnits12mo: null,
     openPoQty: 0,
     openPoRefs: [],
     inbound: null,

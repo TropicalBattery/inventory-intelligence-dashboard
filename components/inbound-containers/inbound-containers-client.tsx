@@ -273,7 +273,7 @@ export function InboundContainersClient({
       });
       const payload = (await response.json().catch(() => null)) as {
         inserted?: number;
-        replacedMonth?: string | null;
+        replacedUploadedRows?: number;
         sourceMonth?: string | null;
         manualRowsPreserved?: number;
         error?: string;
@@ -289,18 +289,17 @@ export function InboundContainersClient({
 
       const next = await reloadSummary();
       const month =
-        payload?.replacedMonth?.trim() ||
-        payload?.sourceMonth?.trim() ||
-        next.sourceMonth?.trim();
+        payload?.sourceMonth?.trim() || next.sourceMonth?.trim();
       const inserted = payload?.inserted ?? 0;
+      const cleared = payload?.replacedUploadedRows ?? 0;
       const manualKept = payload?.manualRowsPreserved ?? 0;
       setBanner({
         tone: "success",
         message: `Loaded ${formatNumber(inserted)}${
           month ? ` for ${month}` : ""
-        }, ${formatNumber(manualKept)} manual row${
-          manualKept === 1 ? "" : "s"
-        } kept.`,
+        } (replaced ${formatNumber(cleared)} uploaded), ${formatNumber(
+          manualKept
+        )} manual row${manualKept === 1 ? "" : "s"} kept.`,
       });
     } catch (error) {
       setBanner({
@@ -460,8 +459,6 @@ export function InboundContainersClient({
       setConfirm(null);
     }
   };
-
-  const confirmMonthLabel = summary.sourceMonth?.trim() || "the sheet month";
 
   const runConfirm = () => {
     if (!confirm) return;
@@ -855,11 +852,8 @@ export function InboundContainersClient({
                 </>
               ) : (
                 <>
-                  This replaces uploaded containers for{" "}
-                  <span className="font-medium text-[#111111]">
-                    {confirmMonthLabel}
-                  </span>
-                  . Manually added containers are kept. Continue?
+                  This replaces all uploaded containers with the new file.
+                  Manually added containers are kept. Continue?
                 </>
               )}
             </p>

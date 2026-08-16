@@ -153,6 +153,116 @@ export function applyAdjustedDemandToRow(
   };
 }
 
+function monthKey(month: Date): string {
+  return `${month.getUTCFullYear()}-${String(month.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+function addUtcMonths(month: Date, delta: number): Date {
+  return new Date(
+    Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + delta, 1)
+  );
+}
+
+/**
+ * Average units per completed month over the last `windowMonths` complete
+ * calendar months (current partial month excluded).
+ *
+ * Denominator is LEAST(windowMonths, months in the SKU's active span inside
+ * the window). Active span starts at the SKU's first observed sales month;
+ * months before that are excluded. Zero-sale months inside the active span
+ * still count (sum 0, still in the denominator). Rounded to 1 decimal.
+ * Returns null when the SKU has no monthly history in/before the window.
+ */
+export function computeAvgMonthlyMovement(
+  monthlyRows: ReadonlyArray<MonthlySalesRow>,
+  options?: {
+    windowMonths?: number;
+    referenceDate?: Date;
+  }
+): number | null {
+  const windowMonths = options?.windowMonths ?? 6;
+  const referenceDate = options?.referenceDate ?? new Date();
+  const windowStart = demandWindowStart(referenceDate, windowMonths);
+  const windowEnd = demandWindowEnd(referenceDate);
+
+  const unitsByMonth = new Map<string, number>();
+  let firstSaleMonth: Date | null = null;
+
+  for (const row of monthlyRows) {
+    const month = parseSalesMonth(row.salesMonth);
+    if (!month) {
+      continue;
+    }
+
+    const key = monthKey(month);
+    unitsByMonth.set(key, (unitsByMonth.get(key) ?? 0) + row.units);
+
+    if (!firstSaleMonth || month.getTime() < firstSaleMonth.getTime()) {
+      firstSaleMonth = month;
+    }
+  }
+
+  if (!firstSaleMonth) {
+    return null;
+  }
+
+  const activeStart =
+    firstSaleMonth.getTime() > windowStart.getTime()
+      ? firstSaleMonth
+      : windowStart;
+
+  if (activeStart.getTime() >= windowEnd.getTime()) {
+    return null;
+  }
+
+  let sum = 0;
+  let monthsOfDataAvailable = 0;
+  for (
+    let cursor = activeStart;
+    cursor.getTime() < windowEnd.getTime();
+    cursor = addUtcMonths(cursor, 1)
+  ) {
+    sum += unitsByMonth.get(monthKey(cursor)) ?? 0;
+    monthsOfDataAvailable += 1;
+  }
+
+  if (monthsOfDataAvailable === 0) {
+    return null;
+  }
+
+  const denominator = Math.min(windowMonths, monthsOfDataAvailable);
+  return Math.round((sum / denominator) * 10) / 10;
+}
+
+/**
+ * Attach 6/12-month average monthly movement from the shared monthly-sales fetch.
+ */
+export function attachAvgMonthlyMovementToRow(
+  row: VwReorderInputsRow,
+  monthlyRows: ReadonlyArray<MonthlySalesRow> | undefined,
+  options?: { referenceDate?: Date }
+): VwReorderInputsRow {
+  if (!monthlyRows || monthlyRows.length === 0) {
+    return {
+      ...row,
+      avg_units_6mo: null,
+      avg_units_12mo: null,
+    };
+  }
+
+  return {
+    ...row,
+    avg_units_6mo: computeAvgMonthlyMovement(monthlyRows, {
+      windowMonths: 6,
+      referenceDate: options?.referenceDate,
+    }),
+    avg_units_12mo: computeAvgMonthlyMovement(monthlyRows, {
+      windowMonths: 12,
+      referenceDate: options?.referenceDate,
+    }),
+  };
+}
+
 export function shouldShowDemandAdjustmentNote(
   rec: Pick<
     ReorderRecommendation,

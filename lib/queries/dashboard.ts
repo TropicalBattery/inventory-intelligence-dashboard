@@ -388,6 +388,8 @@ function mapCriticalViewRowToRecommendation(
     dataGaps: [],
     suggestedQtyZeroReason: null,
     seasonality: null,
+    avgUnits6mo: null,
+    avgUnits12mo: null,
     openPoQty: 0,
     openPoRefs: [],
     inbound: null,
@@ -414,6 +416,7 @@ function parseInventoryStatusCounts(
 }
 
 export const getDashboardStats = cache(async (): Promise<DashboardStats> => {
+  const perfStarted = performance.now();
   const supabase = createAdminClient();
 
   const [
@@ -539,7 +542,7 @@ export const getDashboardStats = cache(async (): Promise<DashboardStats> => {
       }));
   }
 
-  return {
+  const result: DashboardStats = {
     totalSkus: totalSkus ?? 0,
     activeWorkflowSkuCount,
     totalInventoryValue: toNumber(inventoryValue),
@@ -551,6 +554,11 @@ export const getDashboardStats = cache(async (): Promise<DashboardStats> => {
     statusCounts,
     criticalItems,
   };
+
+  console.info(
+    `[PERF] getDashboardStats ${Math.round(performance.now() - perfStarted)}ms`
+  );
+  return result;
 });
 
 export const getDashboardData = cache(async (): Promise<DashboardData> => {  const supabase = createAdminClient();

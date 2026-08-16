@@ -46,8 +46,8 @@ export async function sendPurchaseOrderEmail(
     maximumFractionDigits: 2,
   });
   const totalLabel = po.hasUnknownLineCosts
-    ? `Partial total (some costs unavailable): J$${totalFormatted}`
-    : `Total: J$${totalFormatted}`;
+    ? `Partial total (some costs unavailable): US$${totalFormatted}`
+    : `Total: US$${totalFormatted}`;
 
   const resend = new Resend(apiKey);
 

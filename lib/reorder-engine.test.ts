@@ -50,6 +50,8 @@ function baseRow(overrides: Partial<VwReorderInputsRow> = {}): VwReorderInputsRo
     buyer_rank: null,
     purchase_rule: null,
     seasonality: null,
+    avg_units_6mo: null,
+    avg_units_12mo: null,
     ...overrides,
   };
 }

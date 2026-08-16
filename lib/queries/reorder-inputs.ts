@@ -14,6 +14,7 @@ import {
 } from "@/lib/reorder/cover-thresholds";
 import {
   applyAdjustedDemandToRow,
+  attachAvgMonthlyMovementToRow,
   demandWindowEndIso,
   type MonthlySalesRow,
 } from "@/lib/reorder/demand";
@@ -134,6 +135,8 @@ export function mapViewRowToInputRow(
     buyer_rank: flags.buyerRank,
     purchase_rule: purchaseRule,
     seasonality: null,
+    avg_units_6mo: null,
+    avg_units_12mo: null,
   };
 }
 
@@ -643,6 +646,8 @@ function buildReorderInputRow(
     buyer_rank: whitelistFlags.buyerRank,
     purchase_rule: purchaseRule,
     seasonality: null,
+    avg_units_6mo: null,
+    avg_units_12mo: null,
   };
 }
 
@@ -689,8 +694,11 @@ export async function fetchAllReorderInputRows(
           ? monthlyBySku.get(product.sku)
           : undefined;
         rows.push(
-          attachSeasonalityToRow(
-            applyAdjustedDemandToRow(row, monthly),
+          attachAvgMonthlyMovementToRow(
+            attachSeasonalityToRow(
+              applyAdjustedDemandToRow(row, monthly),
+              monthly
+            ),
             monthly
           )
         );
@@ -874,8 +882,11 @@ export async function fetchReorderInputRowsPage(
   const monthlyBySku = await fetchMonthlySalesBySku(supabase);
   return mapped.map((row) => {
     const monthly = monthlyBySku.get(row.sku);
-    return attachSeasonalityToRow(
-      applyAdjustedDemandToRow(row, monthly),
+    return attachAvgMonthlyMovementToRow(
+      attachSeasonalityToRow(
+        applyAdjustedDemandToRow(row, monthly),
+        monthly
+      ),
       monthly
     );
   });
@@ -943,8 +954,11 @@ export async function fetchReorderInputRowBySku(
     return null;
   }
 
-  return attachSeasonalityToRow(
-    applyAdjustedDemandToRow(row, monthlyRows),
+  return attachAvgMonthlyMovementToRow(
+    attachSeasonalityToRow(
+      applyAdjustedDemandToRow(row, monthlyRows),
+      monthlyRows
+    ),
     monthlyRows
   );
 }

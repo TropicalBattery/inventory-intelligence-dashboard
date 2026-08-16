@@ -8,7 +8,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/Table";
-import { formatCurrencyJMD, formatDateTime } from "@/lib/format";
+import { formatCurrencyUSD, formatDateTime } from "@/lib/format";
 import type { PurchaseOrderListItem, ReorderRecommendation } from "@/lib/types";
 
 type DashboardBottomSectionProps = {
@@ -79,7 +79,7 @@ export function DashboardBottomSection({
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right tabular-nums">
-                    {formatCurrencyJMD(order.totalAmount)}
+                    {formatCurrencyUSD(order.totalAmount)}
                   </TableCell>
                 </TableRow>
               ))

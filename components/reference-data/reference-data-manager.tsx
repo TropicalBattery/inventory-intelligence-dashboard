@@ -20,6 +20,7 @@ import {
 } from "@/components/reference-data/reference-form-fields";
 import { isPlaceholderReferenceRow } from "@/lib/reference-data/placeholder-rows";
 import { NO_QUOTE_ON_FILE_LABEL } from "@/lib/suppliers/no-quote";
+import { formatCurrencyUSD } from "@/lib/format";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -337,7 +338,7 @@ export function ReferenceDataManager({
               <TableHead>Priority</TableHead>
               <TableHead className="text-right">Order cost</TableHead>
               <TableHead className="text-right">Hold cost</TableHead>
-              <TableHead className="text-right">Unit price</TableHead>
+              <TableHead className="text-right">Unit price (US$)</TableHead>
               <TableHead>Notes</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -699,7 +700,7 @@ export function ReferenceDataManager({
                         {NO_QUOTE_ON_FILE_LABEL}
                       </span>
                     ) : (
-                      formatOptionalCurrency(row.unit_price)
+                      formatCurrencyUSD(row.unit_price)
                     )}
                   </TableCell>
                   <TableCell className="max-w-[12rem] truncate">

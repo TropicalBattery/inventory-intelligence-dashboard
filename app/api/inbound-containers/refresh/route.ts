@@ -101,8 +101,8 @@ export async function POST() {
       );
     }
 
-    const replacedMonth = parsed.sourceMonth?.trim() || null;
-    if (!replacedMonth) {
+    const sourceMonth = parsed.sourceMonth?.trim() || null;
+    if (!sourceMonth) {
       return NextResponse.json(
         {
           error:
@@ -117,7 +117,7 @@ export async function POST() {
     const loadedAt = new Date().toISOString();
     const insertRows = parsed.rows.map((row) =>
       mapParsedToInsertRow(
-        { ...row, sourceMonth: replacedMonth },
+        { ...row, sourceMonth },
         TENANT_ID,
         loadedAt
       )
@@ -139,13 +139,12 @@ export async function POST() {
       );
     }
 
-    // Month-scoped, upload-only replace. Manual rows (any month) and upload
-    // rows for other months are never deleted.
+    // Full upload replace: clear every uploaded row for this tenant, then
+    // insert the new sheet. Manual rows (any month/status) are never deleted.
     const { data: deleted, error: deleteError } = await supabase
       .from("inbound_containers")
       .delete()
       .eq("tenant_id", TENANT_ID)
-      .eq("source_month", replacedMonth)
       .eq("entry_source", "upload")
       .select("id");
 
@@ -174,8 +173,8 @@ export async function POST() {
 
     return NextResponse.json({
       inserted: insertRows.length,
-      replacedMonth,
-      sourceMonth: replacedMonth,
+      replacedUploadedRows: deleted?.length ?? 0,
+      sourceMonth,
       loadedAt,
       skippedRows: parsed.skippedRows,
       sheetName: parsed.sheetName,

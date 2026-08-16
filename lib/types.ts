@@ -199,6 +199,16 @@ export type VwReorderInputsRow = {
   purchase_rule: ItemPurchaseRule | null;
   /** Auto-detected from vw_monthly_sales_by_sku; null when no monthly history. */
   seasonality: SeasonalityResult | null;
+  /**
+   * Avg units/month over last 6 completed months (in-memory from monthly sales).
+   * Null when no monthly history in the window.
+   */
+  avg_units_6mo: number | null;
+  /**
+   * Avg units/month over last 12 completed months (in-memory from monthly sales).
+   * Null when no monthly history in the window.
+   */
+  avg_units_12mo: number | null;
 };
 
 export type ReorderRecommendation = {
@@ -281,6 +291,13 @@ export type ReorderRecommendation = {
   suggestedQtyZeroReason: SuggestedQtyZeroReason | null;
   /** Auto-detected from monthly sales history; null when no history fetched. */
   seasonality: SeasonalityResult | null;
+  /**
+   * Avg units/month over last 6 completed months. Both windows travel with the
+   * row so the UI 6/12 toggle needs no refetch. Null when no monthly history.
+   */
+  avgUnits6mo: number | null;
+  /** Avg units/month over last 12 completed months. Null when no monthly history. */
+  avgUnits12mo: number | null;
   /**
    * Units already on platform (dashboard) POs in draft / pending_approval /
    * approved / sent. Distinct from GP quantityOnOrder.

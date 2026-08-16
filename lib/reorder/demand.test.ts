@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { DAYS_PER_MONTH, DEMAND_WINDOW_MONTHS } from "@/lib/reorder/cover-thresholds";
 import {
   applyAdjustedDemandToRow,
+  attachAvgMonthlyMovementToRow,
   computeAdjustedDemandFromMonthlySales,
+  computeAvgMonthlyMovement,
   demandWindowEnd,
   demandWindowStart,
   shouldShowDemandAdjustmentNote,
@@ -57,6 +59,8 @@ function baseInputRow(
     buyer_rank: null,
     purchase_rule: null,
     seasonality: null,
+    avg_units_6mo: null,
+    avg_units_12mo: null,
     ...overrides,
   };
 }
@@ -268,5 +272,133 @@ describe("shouldShowDemandAdjustmentNote", () => {
         stockoutMonthsExcluded: 0,
       })
     ).toBe(false);
+  });
+});
+
+describe("computeAvgMonthlyMovement", () => {
+  // Reference Aug 15 2026 → completed months end Jul 2026
+  const augReference = new Date(Date.UTC(2026, 7, 15));
+
+  it("averages last 6 completed months for a full-history SKU", () => {
+    // Feb–Jul 2026 window: 10+20+30+40+50+60 = 210 / 6 = 35
+    const rows: MonthlySalesRow[] = [
+      { salesMonth: monthIso(2026, 1), units: 10 },
+      { salesMonth: monthIso(2026, 2), units: 20 },
+      { salesMonth: monthIso(2026, 3), units: 30 },
+      { salesMonth: monthIso(2026, 4), units: 40 },
+      { salesMonth: monthIso(2026, 5), units: 50 },
+      { salesMonth: monthIso(2026, 6), units: 60 },
+    ];
+
+    expect(
+      computeAvgMonthlyMovement(rows, {
+        windowMonths: 6,
+        referenceDate: augReference,
+      })
+    ).toBe(35);
+  });
+
+  it("divides by months available when SKU is younger than the window", () => {
+    // First sale Apr 2026; window Feb–Jul → active Apr–Jul (4 mo)
+    // 40+50+60+70 = 220 / 4 = 55
+    const rows: MonthlySalesRow[] = [
+      { salesMonth: monthIso(2026, 3), units: 40 },
+      { salesMonth: monthIso(2026, 4), units: 50 },
+      { salesMonth: monthIso(2026, 5), units: 60 },
+      { salesMonth: monthIso(2026, 6), units: 70 },
+    ];
+
+    expect(
+      computeAvgMonthlyMovement(rows, {
+        windowMonths: 6,
+        referenceDate: augReference,
+      })
+    ).toBe(55);
+  });
+
+  it("counts zero-sale months inside the active span", () => {
+    // First sale Feb; gap in Apr (no row); Feb–Jul active
+    // 10+20+0+40+50+60 = 180 / 6 = 30
+    const rows: MonthlySalesRow[] = [
+      { salesMonth: monthIso(2026, 1), units: 10 },
+      { salesMonth: monthIso(2026, 2), units: 20 },
+      { salesMonth: monthIso(2026, 4), units: 40 },
+      { salesMonth: monthIso(2026, 5), units: 50 },
+      { salesMonth: monthIso(2026, 6), units: 60 },
+    ];
+
+    expect(
+      computeAvgMonthlyMovement(rows, {
+        windowMonths: 6,
+        referenceDate: augReference,
+      })
+    ).toBe(30);
+  });
+
+  it("excludes the current partial month", () => {
+    const rows: MonthlySalesRow[] = [
+      { salesMonth: monthIso(2026, 1), units: 10 },
+      { salesMonth: monthIso(2026, 2), units: 20 },
+      { salesMonth: monthIso(2026, 3), units: 30 },
+      { salesMonth: monthIso(2026, 4), units: 40 },
+      { salesMonth: monthIso(2026, 5), units: 50 },
+      { salesMonth: monthIso(2026, 6), units: 60 },
+      { salesMonth: monthIso(2026, 7), units: 999 }, // Aug — ignored
+    ];
+
+    expect(
+      computeAvgMonthlyMovement(rows, {
+        windowMonths: 6,
+        referenceDate: augReference,
+      })
+    ).toBe(35);
+  });
+
+  it("returns 0.0 when active months exist but all units are zero", () => {
+    const rows: MonthlySalesRow[] = [
+      { salesMonth: monthIso(2026, 5), units: 0 },
+      { salesMonth: monthIso(2026, 6), units: 0 },
+    ];
+
+    expect(
+      computeAvgMonthlyMovement(rows, {
+        windowMonths: 6,
+        referenceDate: augReference,
+      })
+    ).toBe(0);
+  });
+
+  it("returns null when there is no monthly history", () => {
+    expect(
+      computeAvgMonthlyMovement([], {
+        windowMonths: 6,
+        referenceDate: augReference,
+      })
+    ).toBeNull();
+  });
+
+  it("attaches both 6 and 12 month averages on the input row", () => {
+    const rows: MonthlySalesRow[] = [
+      { salesMonth: monthIso(2025, 7), units: 12 }, // Aug 2025
+      { salesMonth: monthIso(2025, 8), units: 12 },
+      { salesMonth: monthIso(2025, 9), units: 12 },
+      { salesMonth: monthIso(2025, 10), units: 12 },
+      { salesMonth: monthIso(2025, 11), units: 12 },
+      { salesMonth: monthIso(2026, 0), units: 12 },
+      { salesMonth: monthIso(2026, 1), units: 10 },
+      { salesMonth: monthIso(2026, 2), units: 20 },
+      { salesMonth: monthIso(2026, 3), units: 30 },
+      { salesMonth: monthIso(2026, 4), units: 40 },
+      { salesMonth: monthIso(2026, 5), units: 50 },
+      { salesMonth: monthIso(2026, 6), units: 60 },
+    ];
+
+    const attached = attachAvgMonthlyMovementToRow(baseInputRow(), rows, {
+      referenceDate: augReference,
+    });
+
+    // 6mo: 210/6 = 35; 12mo: (12*6 + 210)/12 = 282/12 = 23.5
+    expect(attached.avg_units_6mo).toBe(35);
+    expect(attached.avg_units_12mo).toBe(23.5);
   });
 });
