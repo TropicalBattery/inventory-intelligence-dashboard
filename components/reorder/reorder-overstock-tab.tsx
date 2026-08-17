@@ -12,6 +12,7 @@ import {
   listingSearchInputClassName,
 } from "@/components/shared/listing-toolbar";
 import { MultiSelectFilter } from "@/components/shared/multi-select-filter";
+import { TablePagination } from "@/components/shared/table-pagination";
 import { Card } from "@/components/ui/Card";
 import {
   Table,
@@ -612,35 +613,18 @@ export function ReorderOverstockTab({
               </TableBody>
             </Table>
 
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#E5E7EB] px-4 py-3 text-sm text-slate-600">
-              <p>
-                Showing {formatNumber(pageStart)}-{formatNumber(pageEnd)} of{" "}
-                {formatNumber(sortedRows.length)}
-              </p>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  disabled={currentPage <= 1}
-                  onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
-                  className="rounded-lg border border-[#E5E7EB] bg-white px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Previous
-                </button>
-                <span className="tabular-nums">
-                  Page {currentPage} of {totalPages}
-                </span>
-                <button
-                  type="button"
-                  disabled={currentPage >= totalPages}
-                  onClick={() =>
-                    setCurrentPage((page) => Math.min(totalPages, page + 1))
-                  }
-                  className="rounded-lg border border-[#E5E7EB] bg-white px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Next
-                </button>
-              </div>
-            </div>
+            <TablePagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={setCurrentPage}
+              className="border-[#E5E7EB] px-4"
+              summary={
+                <>
+                  Showing {formatNumber(pageStart)}-{formatNumber(pageEnd)} of{" "}
+                  {formatNumber(sortedRows.length)}
+                </>
+              }
+            />
           </>
         )}
       </Card>

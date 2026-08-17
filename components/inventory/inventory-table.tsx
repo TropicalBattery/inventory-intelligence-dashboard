@@ -13,6 +13,7 @@ import {
   listingSearchInputClassName,
 } from "@/components/shared/listing-toolbar";
 import { MultiSelectFilter } from "@/components/shared/multi-select-filter";
+import { TablePagination } from "@/components/shared/table-pagination";
 import { UomCell } from "@/components/shared/uom-cell";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
@@ -429,8 +430,21 @@ export function InventoryTable({
   );
   const cataloguePageStart = totalCount === 0 ? 0 : pageStartIndex + 1;
   const cataloguePageEnd = Math.min(pageStartIndex + pageSize, totalCount);
-  const isFirstPage = safePage <= 1;
   const isLastPage = safePage >= totalPages;
+
+  const filteredTotals = useMemo(() => {
+    let quantityAvailable = 0;
+    let quantityOnHand = 0;
+    let quantityOnOrder = 0;
+
+    for (const item of filteredRows) {
+      quantityAvailable += item.recommendation.quantityAvailable;
+      quantityOnHand += item.recommendation.quantityOnHand;
+      quantityOnOrder += item.recommendation.quantityOnOrder;
+    }
+
+    return { quantityAvailable, quantityOnHand, quantityOnOrder };
+  }, [filteredRows]);
 
   useEffect(() => {
     if (page > totalPages && totalPages >= 1) {
@@ -870,42 +884,40 @@ export function InventoryTable({
                     </Fragment>
                   );
                 })}
+                {isLastPage && totalCount > 0 ? (
+                  <TableRow className="bg-[#F9FAFB] hover:bg-[#F9FAFB] [&>td]:border-t [&>td]:border-slate-200 [&>td]:py-2.5">
+                    <TableCell
+                      colSpan={4}
+                      className="px-3 text-sm font-semibold text-slate-900"
+                    >
+                      Total
+                    </TableCell>
+                    <TableCell className="px-2 text-right text-sm font-semibold tabular-nums text-slate-900">
+                      {formatNumber(filteredTotals.quantityAvailable)}
+                    </TableCell>
+                    <TableCell className="px-2 text-right text-sm font-semibold tabular-nums text-slate-900">
+                      {formatNumber(filteredTotals.quantityOnHand)}
+                    </TableCell>
+                    <TableCell className="px-2 text-right text-sm font-semibold tabular-nums text-slate-900">
+                      {formatNumber(filteredTotals.quantityOnOrder)}
+                    </TableCell>
+                    <TableCell className="px-2 text-right text-sm tabular-nums text-slate-500">
+                      -
+                    </TableCell>
+                    <TableCell className="px-3" />
+                  </TableRow>
+                ) : null}
               </TableBody>
             </Table>
 
-            <div className="flex flex-col gap-3 border-t border-slate-100 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-wrap items-center gap-3">
-                <p className="text-sm text-slate-600">
-                  Page {formatNumber(safePage)} of {formatNumber(totalPages)}
-                </p>
-                <div className="flex gap-2">
-                  {isFirstPage ? (
-                    <span className="rounded-2xl border border-transparent bg-white px-3 py-1.5 text-sm font-medium text-slate-400 shadow-card">
-                      Previous
-                    </span>
-                  ) : (
-                    <Link
-                      href={inventoryPageHref(safePage - 1, showInactive)}
-                      className="rounded-2xl border border-transparent bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-card hover:bg-slate-50"
-                    >
-                      Previous
-                    </Link>
-                  )}
-                  {isLastPage ? (
-                    <span className="rounded-2xl border border-transparent bg-white px-3 py-1.5 text-sm font-medium text-slate-400 shadow-card">
-                      Next
-                    </span>
-                  ) : (
-                    <Link
-                      href={inventoryPageHref(safePage + 1, showInactive)}
-                      className="rounded-2xl border border-transparent bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-card hover:bg-slate-50"
-                    >
-                      Next
-                    </Link>
-                  )}
-                </div>
-              </div>
-            </div>
+            <TablePagination
+              currentPage={safePage}
+              totalPages={totalPages}
+              hrefForPage={(pageNumber) =>
+                inventoryPageHref(pageNumber, showInactive)
+              }
+              className="px-6 py-4"
+            />
           </>
         )}
       </Card>

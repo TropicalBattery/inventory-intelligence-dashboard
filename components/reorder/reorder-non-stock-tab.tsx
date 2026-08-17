@@ -10,6 +10,7 @@ import {
   listingSearchInputClassName,
 } from "@/components/shared/listing-toolbar";
 import { MultiSelectFilter } from "@/components/shared/multi-select-filter";
+import { TablePagination } from "@/components/shared/table-pagination";
 import { Card } from "@/components/ui/Card";
 import {
   Table,
@@ -343,33 +344,17 @@ export function ReorderNonStockTab({
               </TableBody>
             </Table>
 
-            <div className="flex flex-col items-end gap-2 border-t border-slate-100 px-6 py-3 sm:flex-row sm:items-center sm:justify-end sm:gap-3">
-              <button
-                type="button"
-                disabled={currentPage <= 1}
-                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
-                className="rounded-2xl border border-transparent shadow-card bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <p className="text-sm text-slate-700">
-                Page {currentPage} of {formatNumber(totalPages)}
-              </p>
-              <button
-                type="button"
-                disabled={currentPage >= totalPages}
-                onClick={() =>
-                  setCurrentPage((page) => Math.min(totalPages, page + 1))
-                }
-                className="rounded-2xl border border-transparent shadow-card bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Next
-              </button>
-              <p className="text-sm text-slate-500">
-                Showing {formatNumber(pageStart)}-{formatNumber(pageEnd)} of{" "}
-                {formatNumber(filteredRows.length)} items
-              </p>
-            </div>
+            <TablePagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={setCurrentPage}
+              summary={
+                <>
+                  Showing {formatNumber(pageStart)}-{formatNumber(pageEnd)} of{" "}
+                  {formatNumber(filteredRows.length)} items
+                </>
+              }
+            />
           </>
         )}
       </Card>
