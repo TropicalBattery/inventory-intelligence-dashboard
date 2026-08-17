@@ -41,6 +41,7 @@ import {
   type ExportColumnDef,
 } from "@/lib/listing/export";
 import {
+  summarizeInventoryQuantityTotals,
   summarizeInventoryStats,
   type InventoryItem,
   type InventoryLocationBalance,
@@ -420,6 +421,11 @@ export function InventoryTable({
     classFilter,
   ]);
 
+  const quantityTotals = useMemo(
+    () => summarizeInventoryQuantityTotals(filteredRows),
+    [filteredRows]
+  );
+
   const totalCount = filteredRows.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -430,21 +436,6 @@ export function InventoryTable({
   );
   const cataloguePageStart = totalCount === 0 ? 0 : pageStartIndex + 1;
   const cataloguePageEnd = Math.min(pageStartIndex + pageSize, totalCount);
-  const isLastPage = safePage >= totalPages;
-
-  const filteredTotals = useMemo(() => {
-    let quantityAvailable = 0;
-    let quantityOnHand = 0;
-    let quantityOnOrder = 0;
-
-    for (const item of filteredRows) {
-      quantityAvailable += item.recommendation.quantityAvailable;
-      quantityOnHand += item.recommendation.quantityOnHand;
-      quantityOnOrder += item.recommendation.quantityOnOrder;
-    }
-
-    return { quantityAvailable, quantityOnHand, quantityOnOrder };
-  }, [filteredRows]);
 
   useEffect(() => {
     if (page > totalPages && totalPages >= 1) {
@@ -618,34 +609,61 @@ export function InventoryTable({
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-transparent bg-white px-4 py-3 text-sm text-slate-600 shadow-card">
-        <span>
-          Total:{" "}
-          <strong className="font-semibold text-slate-900">
-            {formatNumber(stats.total)}
-          </strong>
-        </span>
-        <span className="text-slate-300">|</span>
-        <span>
-          Critical:{" "}
-          <strong className="font-semibold text-red-700">
-            {formatNumber(stats.critical)}
-          </strong>
-        </span>
-        <span className="text-slate-300">|</span>
-        <span>
-          Reorder Needed:{" "}
-          <strong className="font-semibold text-amber-700">
-            {formatNumber(stats.reorderNeeded)}
-          </strong>
-        </span>
-        <span className="text-slate-300">|</span>
-        <span>
-          OK:{" "}
-          <strong className="font-semibold text-green-700">
-            {formatNumber(stats.ok)}
-          </strong>
-        </span>
+      <div className="rounded-2xl border border-transparent bg-white px-4 py-3 text-sm text-slate-600 shadow-card">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <span>
+            Total:{" "}
+            <strong className="font-semibold text-slate-900">
+              {formatNumber(stats.total)}
+            </strong>
+          </span>
+          <span className="text-slate-300">|</span>
+          <span>
+            Critical:{" "}
+            <strong className="font-semibold text-red-700">
+              {formatNumber(stats.critical)}
+            </strong>
+          </span>
+          <span className="text-slate-300">|</span>
+          <span>
+            Reorder Needed:{" "}
+            <strong className="font-semibold text-amber-700">
+              {formatNumber(stats.reorderNeeded)}
+            </strong>
+          </span>
+          <span className="text-slate-300">|</span>
+          <span>
+            OK:{" "}
+            <strong className="font-semibold text-green-700">
+              {formatNumber(stats.ok)}
+            </strong>
+          </span>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 border-t-[0.5px] border-slate-200 pt-2">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-slate-400">
+            Quantities
+          </span>
+          <span>
+            Qty Available:{" "}
+            <strong className="font-semibold tabular-nums text-slate-900">
+              {formatNumber(quantityTotals.quantityAvailable)}
+            </strong>
+          </span>
+          <span className="text-slate-300">|</span>
+          <span>
+            On Hand:{" "}
+            <strong className="font-semibold tabular-nums text-slate-900">
+              {formatNumber(quantityTotals.quantityOnHand)}
+            </strong>
+          </span>
+          <span className="text-slate-300">|</span>
+          <span>
+            On Order:{" "}
+            <strong className="font-semibold tabular-nums text-slate-900">
+              {formatNumber(quantityTotals.quantityOnOrder)}
+            </strong>
+          </span>
+        </div>
       </div>
 
       <Card className="w-full max-w-full overflow-visible rounded-2xl p-0">
@@ -884,29 +902,6 @@ export function InventoryTable({
                     </Fragment>
                   );
                 })}
-                {isLastPage && totalCount > 0 ? (
-                  <TableRow className="bg-[#F9FAFB] hover:bg-[#F9FAFB] [&>td]:border-t [&>td]:border-slate-200 [&>td]:py-2.5">
-                    <TableCell
-                      colSpan={4}
-                      className="px-3 text-sm font-semibold text-slate-900"
-                    >
-                      Total
-                    </TableCell>
-                    <TableCell className="px-2 text-right text-sm font-semibold tabular-nums text-slate-900">
-                      {formatNumber(filteredTotals.quantityAvailable)}
-                    </TableCell>
-                    <TableCell className="px-2 text-right text-sm font-semibold tabular-nums text-slate-900">
-                      {formatNumber(filteredTotals.quantityOnHand)}
-                    </TableCell>
-                    <TableCell className="px-2 text-right text-sm font-semibold tabular-nums text-slate-900">
-                      {formatNumber(filteredTotals.quantityOnOrder)}
-                    </TableCell>
-                    <TableCell className="px-2 text-right text-sm tabular-nums text-slate-500">
-                      -
-                    </TableCell>
-                    <TableCell className="px-3" />
-                  </TableRow>
-                ) : null}
               </TableBody>
             </Table>
 

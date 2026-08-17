@@ -36,6 +36,13 @@ export type InventoryStats = {
   ok: number;
 };
 
+/** Quantity sums over a filtered inventory item set (full set, not one page). */
+export type InventoryQuantityTotals = {
+  quantityAvailable: number;
+  quantityOnHand: number;
+  quantityOnOrder: number;
+};
+
 export const INVENTORY_PAGE_SIZE = 50;
 
 export function isInventoryInactiveItem(
@@ -117,6 +124,30 @@ export function summarizeInventoryStats(
     critical,
     reorderNeeded,
     ok,
+  };
+}
+
+/**
+ * Sums Qty Available / On Hand / On Order for the same filtered item set
+ * that feeds the inventory list (all matching rows, not the current page).
+ */
+export function summarizeInventoryQuantityTotals(
+  items: InventoryItem[]
+): InventoryQuantityTotals {
+  let quantityAvailable = 0;
+  let quantityOnHand = 0;
+  let quantityOnOrder = 0;
+
+  for (const item of items) {
+    quantityAvailable += item.recommendation.quantityAvailable;
+    quantityOnHand += item.recommendation.quantityOnHand;
+    quantityOnOrder += item.recommendation.quantityOnOrder;
+  }
+
+  return {
+    quantityAvailable,
+    quantityOnHand,
+    quantityOnOrder,
   };
 }
 
