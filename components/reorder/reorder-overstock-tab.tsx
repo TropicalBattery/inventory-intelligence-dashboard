@@ -544,15 +544,18 @@ export function ReorderOverstockTab({
         </div>
       ) : null}
 
-      <Card className="rounded-2xl p-0">
+      <Card className="overflow-visible max-[1366px]:overflow-hidden rounded-2xl p-0">
         {sortedRows.length === 0 ? (
           <div className="px-6 py-10 text-center text-sm text-slate-500">
             No overstocked items match your filters.
           </div>
         ) : (
           <>
-            <Table containerClassName="rounded-2xl border-0 !overflow-visible">
-              <TableHeader className="sticky top-[5.125rem] z-20 bg-[#F9FAFB]">
+            <Table
+              className="max-[1366px]:!min-w-[1100px]"
+              containerClassName="rounded-2xl border-0 !overflow-visible max-[1366px]:!overflow-x-auto"
+            >
+              <TableHeader className="sticky top-[5.125rem] max-[1366px]:top-0 z-20 bg-[#F9FAFB]">
                 <TableRow className="hover:bg-transparent">
                   <TableHead>SKU</TableHead>
                   <TableHead>Product Name</TableHead>

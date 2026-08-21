@@ -521,13 +521,13 @@ function AnalysisSection({
   zeroReasonDetail: string | null;
 }) {
   return (
-    <div className="mb-5 rounded-lg bg-white p-5 ring-1 ring-slate-200">
+    <div className="mb-5 rounded-lg bg-white p-5 ring-1 ring-slate-200 max-[1366px]:mb-3 max-[1366px]:p-3.5">
       <div className="flex items-center gap-2">
         <Sparkles className="h-4 w-4 text-tbc-red" aria-hidden="true" />
         <h4 className="text-sm font-semibold text-slate-900">Analysis</h4>
       </div>
 
-      <div className="mt-4">
+      <div className="mt-4 max-[1366px]:mt-2">
         {isLoadingExplanation ? (
           <AnalysisSkeleton />
         ) : explanation ? (
@@ -536,7 +536,7 @@ function AnalysisSection({
       </div>
 
       {zeroReasonDetail || dataGaps.length > 0 ? (
-        <ul className="mt-3 space-y-1.5 border-t border-slate-200 pt-3">
+        <ul className="mt-3 space-y-1.5 border-t border-slate-200 pt-3 max-[1366px]:mt-2 max-[1366px]:pt-2">
           {zeroReasonDetail ? (
             <li className="flex items-start gap-2 text-xs text-slate-600">
               <Info
@@ -939,14 +939,15 @@ export function ReorderExpandedPanel({
   }
 
   return (
-    <div className="border-t border-[#E5E7EB] bg-[#F9FAFB] px-4 py-4">
+    <div className="border-t border-[#E5E7EB] bg-[#F9FAFB] px-4 py-4 max-[1366px]:px-3 max-[1366px]:py-3">
       {getSeasonalReorderWarning(seasonalityProfile) ? (
-        <div className="mb-4">
+        <div className="mb-4 max-[1366px]:mb-2.5">
           <SeasonalWarningBadge profile={seasonalityProfile} />
         </div>
       ) : null}
 
-      <div className="mb-5 grid grid-cols-2 gap-8 divide-x divide-[#E5E7EB] rounded-2xl border border-[#E5E7EB] bg-white p-6">
+      {/* Desktop (≥1367): two-column layout, untouched */}
+      <div className="mb-5 grid grid-cols-2 gap-8 divide-x divide-[#E5E7EB] rounded-2xl border border-[#E5E7EB] bg-white p-6 max-[1366px]:hidden">
         <div>
           <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-[#6B7280]">
             Suggested Order
@@ -1206,6 +1207,252 @@ export function ReorderExpandedPanel({
         </div>
       </div>
 
+      {/* ≤1366: dense single-band Suggested + aligned Simulate row */}
+      <div className="mb-3 hidden rounded-xl border border-[#E5E7EB] bg-white p-4 max-[1366px]:block">
+        <div className="mb-2.5 flex flex-wrap items-center gap-3">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-[#6B7280]">
+            Suggested
+          </span>
+          <span className="text-[28px] font-bold leading-none text-[#111827]">
+            {formatNumber(rec.suggestedQtyRounded)}
+          </span>
+          {statusBadge ? (
+            <span className={statusBadge.className}>{statusBadge.label}</span>
+          ) : null}
+          <span
+            className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-full border px-2.5 py-0.5 text-xs font-semibold leading-none ${getCoverPillClasses(
+              suggestedMonthsOfCover,
+              coverDemandUnknown,
+              rec.coverBands
+            )}`}
+          >
+            {coverDemandUnknown || suggestedMonthsOfCover === null
+              ? "Cover unknown"
+              : `${suggestedMonthsOfCover.toFixed(1)} mo cover`}
+          </span>
+          <span
+            className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${
+              isValidNumber(suggestedTotalCost)
+                ? "border-[#BFDBFE] bg-[#EFF6FF] text-[#1D4ED8]"
+                : "border-[#E5E7EB] bg-[#F3F4F6] text-[#9CA3AF]"
+            }`}
+          >
+            {isValidNumber(suggestedTotalCost)
+              ? formatUsdAmount(suggestedTotalCost)
+              : "Cost unknown"}
+          </span>
+          <span
+            className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${
+              suggestedArrivalLabel
+                ? "border-[#DDD6FE] bg-[#F5F3FF] text-[#6D28D9]"
+                : "border-[#E5E7EB] bg-[#F3F4F6] text-[#9CA3AF]"
+            }`}
+          >
+            {suggestedArrivalLabel ?? "Lead time unknown"}
+          </span>
+          {rec.seasonality?.isSeasonal && rec.seasonality.peakLabel ? (
+            <span
+              className="rounded-full border border-[#DDD6FE] bg-[#F5F3FF] px-2.5 py-0.5 text-xs font-semibold text-[#6D28D9]"
+              title="Based on observed monthly sales; single-cycle evidence only"
+            >
+              Peak: {rec.seasonality.peakLabel}
+              {rec.seasonality.strength != null
+                ? ` (${rec.seasonality.strength}x avg)`
+                : ""}
+            </span>
+          ) : null}
+        </div>
+        <p className="mb-3 text-[11px] text-[#9CA3AF]">
+          {rec.effectiveLeadTimeDays != null && rec.effectiveLeadTimeDays > 0
+            ? `Thresholds based on ${formatNumber(rec.effectiveLeadTimeDays)}-day lead time (${resolveSupplierDisplayName(
+                rec.effectiveLeadTimeSupplierExternalId ===
+                  rec.supplierExternalId
+                  ? rec.supplierName
+                  : null,
+                rec.effectiveLeadTimeSupplierExternalId
+              )})`
+            : "Standard thresholds (no lead time on file)"}
+        </p>
+
+        <div className="-mx-4 mb-3 border-t border-[#F3F4F6]" />
+
+        {openPoConfirmPending &&
+        Number.isFinite(rec.openPoQty) &&
+        rec.openPoQty > 0 ? (
+          <div
+            role="status"
+            className="mb-3 w-full rounded-xl border border-[#BFDBFE] bg-[#EFF6FF] px-3 py-2.5 text-left text-sm text-[#1E3A8A]"
+          >
+            <p>
+              {rec.sku} already has {formatNumber(rec.openPoQty)} units on{" "}
+              {rec.openPoRefs[0]?.poNumber ?? "a platform PO"}
+              {rec.openPoRefs[0]
+                ? ` (${rec.openPoRefs[0].status.replace(/_/g, " ")})`
+                : ""}
+              {rec.openPoRefs.length > 1
+                ? ` +${rec.openPoRefs.length - 1} more`
+                : ""}
+              . Add anyway?
+            </p>
+            <div className="mt-2 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                disabled={isAddingToPo}
+                onClick={() => {
+                  void handleAddToPo();
+                }}
+                className="rounded-xl bg-tbc-red px-3 py-1.5 text-sm font-medium text-white hover:bg-tbc-red-hover disabled:opacity-60"
+              >
+                {isAddingToPo ? "Adding..." : "Add anyway"}
+              </button>
+              <button
+                type="button"
+                disabled={isAddingToPo}
+                onClick={() => setOpenPoConfirmPending(false)}
+                className="rounded-xl border border-[#E5E7EB] bg-white px-3 py-1.5 text-sm font-medium text-[#374151] hover:bg-[#F9FAFB] disabled:opacity-60"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="flex flex-wrap items-end gap-4">
+          <div>
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[#6B7280]">
+              Simulate qty
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={orderQtyInput}
+                onChange={(event) => setOrderQtyInput(event.target.value)}
+                aria-label="Simulated order quantity"
+                className="w-20 rounded-lg border border-[#D1D5DB] px-3 py-1.5 text-center text-xl font-bold text-[#111111] transition-all duration-150 focus:border-[#CC2B2B] focus:outline-none focus:ring-2 focus:ring-[#CC2B2B]/10"
+              />
+              <button
+                type="button"
+                onClick={() =>
+                  setOrderQtyInput(String(rec.suggestedQtyRounded))
+                }
+                className="cursor-pointer text-xs text-[#6B7280] underline underline-offset-2 hover:text-[#374151]"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+
+          <div className="grid min-w-[280px] flex-1 grid-cols-3 gap-3">
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-[#6B7280]">
+                Cover
+              </div>
+              <div
+                className={`mt-0.5 text-sm font-semibold ${
+                  coverDemandUnknown || debouncedMonthsOfCover === null
+                    ? "text-[#9CA3AF]"
+                    : "text-[#059669]"
+                }`}
+              >
+                {coverDemandUnknown || debouncedMonthsOfCover === null
+                  ? "Unknown"
+                  : formatMonthsOfCoverLabel(debouncedMonthsOfCover)}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-[#6B7280]">
+                Total cost
+              </div>
+              <div
+                className={`mt-0.5 text-sm font-semibold ${
+                  totalCostUsd === "-" ? "text-[#9CA3AF]" : "text-[#1D4ED8]"
+                }`}
+              >
+                {totalCostUsd}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-[#6B7280]">
+                Est. arrival
+              </div>
+              <div
+                className={`mt-0.5 text-sm font-semibold ${
+                  simulatorArrival === "-" ? "text-[#9CA3AF]" : "text-[#111827]"
+                }`}
+              >
+                {simulatorArrival}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex shrink-0 flex-col items-stretch gap-1.5 sm:items-end">
+            <span
+              className={
+                !canAddToPo
+                  ? "inline-flex cursor-not-allowed"
+                  : "inline-flex"
+              }
+              title={
+                purchaseBlocked
+                  ? purchaseBlockNote ?? undefined
+                  : !canAddToPo
+                    ? "Quantity must be greater than 0"
+                    : undefined
+              }
+            >
+              <button
+                type="button"
+                disabled={
+                  !canAddToPo ||
+                  isAddingToPo ||
+                  (openPoConfirmPending && rec.openPoQty > 0)
+                }
+                onClick={() => {
+                  void handleAddToPo();
+                }}
+                className={`inline-flex whitespace-nowrap items-center gap-1.5 rounded-lg px-4 py-2 text-[13px] font-semibold transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-60 ${
+                  justAdded
+                    ? "bg-[#16A34A] text-white hover:bg-[#15803D]"
+                    : skuInCart
+                      ? "border border-[#E5E7EB] bg-white text-[#374151] hover:bg-[#F9FAFB]"
+                      : "bg-[#CC2B2B] text-white hover:bg-tbc-red-hover"
+                }`}
+              >
+                {justAdded ? (
+                  <>
+                    <i className="ti ti-check text-base" aria-hidden="true" />
+                    Added
+                  </>
+                ) : isAddingToPo ? (
+                  "Adding..."
+                ) : skuInCart ? (
+                  <>
+                    <i className="ti ti-check text-base" aria-hidden="true" />
+                    In cart - add again
+                  </>
+                ) : (
+                  <>
+                    <i className="ti ti-plus text-base" aria-hidden="true" />
+                    Add to PO
+                  </>
+                )}
+              </button>
+            </span>
+            {purchaseBlockNote ? (
+              <p className="text-xs text-[#9CA3AF]">{purchaseBlockNote}</p>
+            ) : null}
+          </div>
+        </div>
+
+        {addToPoError ? (
+          <p role="alert" className="mt-2 text-sm text-red-600">
+            {addToPoError}
+          </p>
+        ) : null}
+      </div>
+
       <AnalysisSection
         explanation={explanation}
         isLoadingExplanation={isLoadingExplanation}
@@ -1214,13 +1461,13 @@ export function ReorderExpandedPanel({
       />
 
       {!suppliersLoading && suppliers.length > 0 ? (
-        <div className="mb-5">
-          <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="mb-5 max-[1366px]:mb-3">
+          <div className="mb-3 flex items-center justify-between gap-3 max-[1366px]:mb-2">
             <div>
               <h4 className="text-xs font-semibold uppercase tracking-widest text-[#6B7280]">
                 Available Suppliers
               </h4>
-              <p className="mt-1 text-xs text-[#9CA3AF]">
+              <p className="mt-1 text-xs text-[#9CA3AF] max-[1366px]:mt-0.5">
                 Reference data quotes for this SKU only
               </p>
             </div>
@@ -1230,10 +1477,11 @@ export function ReorderExpandedPanel({
             </span>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-[#E5E7EB]">
+          {/* Desktop (≥1367): wide grid with header-collision gap fix. Untouched. */}
+          <div className="overflow-hidden rounded-xl border border-[#E5E7EB] max-[1366px]:hidden">
             <div className="max-h-[17.5rem] overflow-x-auto overflow-y-auto">
               <div className="min-w-[56rem]">
-                <div className="sticky top-0 z-10 grid grid-cols-[minmax(10rem,1.2fr)_6rem_7rem_8rem_7rem_6rem_5.5rem] border-b border-[#E5E7EB] bg-[#F9FAFB] px-4 py-2.5 text-xs font-semibold uppercase tracking-widest text-[#6B7280]">
+                <div className="sticky top-0 z-10 grid grid-cols-[minmax(10rem,1.2fr)_6rem_8rem_8rem_7rem_6rem_5.5rem] gap-x-3 border-b border-[#E5E7EB] bg-[#F9FAFB] px-4 py-2.5 text-xs font-semibold uppercase tracking-widest text-[#6B7280]">
                   <span>Supplier Name</span>
                   <span className="text-right">Lead Time</span>
                   <span className="text-right">Unit Price (US$)</span>
@@ -1255,7 +1503,7 @@ export function ReorderExpandedPanel({
                     <div
                       key={supplier.supplierExternalId}
                       className={[
-                        "grid grid-cols-[minmax(10rem,1.2fr)_6rem_7rem_8rem_7rem_6rem_5.5rem] items-center border-t border-[#F3F4F6] px-4 py-3 text-sm transition-colors hover:bg-[#F9FAFB]",
+                        "grid grid-cols-[minmax(10rem,1.2fr)_6rem_8rem_8rem_7rem_6rem_5.5rem] gap-x-3 items-center border-t border-[#F3F4F6] px-4 py-3 text-sm transition-colors hover:bg-[#F9FAFB]",
                         isSelected ? "bg-[#EFF6FF]/60" : "bg-white",
                       ].join(" ")}
                     >
@@ -1340,6 +1588,133 @@ export function ReorderExpandedPanel({
                 })}
               </div>
             </div>
+          </div>
+
+          {/* ≤1366: stacked mini-cards, no min-w / no horizontal scroll */}
+          <div className="hidden max-h-[17.5rem] space-y-2 overflow-y-auto max-[1366px]:block">
+            {suppliers.map((supplier) => {
+              const isSelected =
+                selectedSupplierExternalId === supplier.supplierExternalId;
+              const isLockedVendor =
+                Boolean(lockedVendorId) &&
+                supplier.supplierExternalId === lockedVendorId;
+              const selectDisabled =
+                Boolean(lockedVendorId) && !isLockedVendor;
+
+              return (
+                <div
+                  key={`card-${supplier.supplierExternalId}`}
+                  className={[
+                    "rounded-xl border border-[#E5E7EB] px-3.5 py-3",
+                    isSelected ? "bg-[#EFF6FF]/60" : "bg-white",
+                  ].join(" ")}
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p
+                      className="text-sm font-semibold text-[#111111]"
+                      title={supplier.supplierExternalId}
+                    >
+                      {resolveSupplierDisplayName(
+                        supplier.supplierName,
+                        supplier.supplierExternalId
+                      )}
+                    </p>
+                    {isLockedVendor ? (
+                      <span className="inline-flex rounded-full border border-[#BFDBFE] bg-[#EFF6FF] px-2.5 py-0.5 text-xs font-medium text-[#1D4ED8]">
+                        Required vendor
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2.5 sm:grid-cols-3">
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-[#6B7280]">
+                        Lead Time
+                      </div>
+                      <div className="mt-0.5 text-sm text-[#111111]">
+                        {isValidNumber(supplier.leadTimeDays) ? (
+                          `${formatNumber(supplier.leadTimeDays)}d`
+                        ) : (
+                          <span className="text-[#9CA3AF]">-</span>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-[#6B7280]">
+                        Unit Price (US$)
+                      </div>
+                      <div className="mt-0.5 text-sm font-medium text-[#111111]">
+                        {formatSupplierUnitPrice(supplier.unitPrice)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-[#6B7280]">
+                        Reliability
+                      </div>
+                      <div className="mt-0.5">
+                        {supplier.reliabilityRating ? (
+                          <span
+                            className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-semibold ${getReliabilityBadgeClasses(
+                              supplier.reliabilityRating
+                            )}`}
+                          >
+                            {supplier.reliabilityRating}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-[#9CA3AF]">-</span>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-[#6B7280]">
+                        Region
+                      </div>
+                      <div className="mt-0.5 text-sm text-[#111111]">
+                        {supplier.supplierRegion ? (
+                          supplier.supplierRegion
+                        ) : (
+                          <span className="text-[#9CA3AF]">-</span>
+                        )}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-[#6B7280]">
+                        Min Order
+                      </div>
+                      <div className="mt-0.5 text-sm text-[#111111]">
+                        {isValidNumber(supplier.minOrderQty) ? (
+                          formatNumber(supplier.minOrderQty)
+                        ) : (
+                          <span className="text-[#9CA3AF]">-</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex justify-end">
+                    {isSelected ? (
+                      <span className="inline-flex w-full cursor-default items-center justify-center rounded-full border border-[#86EFAC] bg-[#F0FDF4] px-3 py-2 text-xs font-medium text-[#16A34A] sm:w-auto sm:px-4 sm:py-1.5">
+                        Selected
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={selectDisabled}
+                        title={
+                          selectDisabled
+                            ? `Locked to ${lockedVendorLabel ?? "vendor"} per buyer rules`
+                            : undefined
+                        }
+                        onClick={() => handleSelectSupplier(supplier)}
+                        className="w-full cursor-pointer rounded-full border border-[#E5E7EB] px-3 py-2 text-xs font-medium text-[#6B7280] transition-colors duration-150 hover:border-[#CC2B2B] hover:text-[#CC2B2B] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-[#E5E7EB] disabled:hover:text-[#6B7280] sm:w-auto sm:px-4 sm:py-1.5"
+                      >
+                        Select
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       ) : null}

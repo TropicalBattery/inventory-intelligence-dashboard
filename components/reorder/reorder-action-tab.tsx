@@ -9,6 +9,7 @@ import {
 import { usePoCart } from "@/components/po-cart/po-cart-provider";
 import { AiSummaryPanel } from "@/components/reorder/ai-summary-panel";
 import { CoverBadge } from "@/components/reorder/months-of-cover-display";
+import { ReorderCardList } from "@/components/reorder/reorder-card-list";
 import { ReorderExpandedPanel } from "@/components/reorder/reorder-expanded-panel";
 import { SavedViewsControls } from "@/components/reorder/saved-views-controls";
 import {
@@ -1503,7 +1504,24 @@ export function ReorderActionTab({
           />
         </div>
 
-        <Card className="mt-2 w-full max-w-full min-w-0 overflow-visible rounded-2xl p-0">
+        {/* ≤1366: card list. Desktop table stays below and is CSS-hidden under 1366. */}
+        <div className="mt-2 hidden max-[1366px]:block">
+          <ReorderCardList
+            rows={sortedMainRows}
+            avgMovementWindow={avgMovementWindow}
+            selectedKeys={selectedKeys}
+            expandedSkus={expandedSkus}
+            seasonalityBySku={seasonalityBySku}
+            explanationCache={explanationCache}
+            explanationLoading={explanationLoading}
+            rowKey={rowKey}
+            onToggleExpanded={toggleExpanded}
+            onToggleRowSelection={toggleRowSelection}
+          />
+        </div>
+
+        <div className="mt-2 max-[1366px]:hidden">
+        <Card className="w-full max-w-full min-w-0 overflow-visible rounded-2xl p-0">
         {sortedMainRows.length === 0 ? (
           <div className="px-6 py-10 text-center text-sm text-slate-500">
             No rows match the current filters.
@@ -1728,6 +1746,7 @@ export function ReorderActionTab({
           </Table>
         )}
         </Card>
+        </div>
       </div>
 
       {showNoDemandItems && sortedNoDemandRows.length > 0 ? (
@@ -1736,6 +1755,22 @@ export function ReorderActionTab({
             No demand in last 13 months. May be slow-moving, seasonal, or
             discontinued.
           </p>
+          <div className="hidden max-[1366px]:block">
+            <ReorderCardList
+              rows={sortedNoDemandRows}
+              avgMovementWindow={avgMovementWindow}
+              selectedKeys={selectedKeys}
+              expandedSkus={expandedSkus}
+              seasonalityBySku={seasonalityBySku}
+              explanationCache={explanationCache}
+              explanationLoading={explanationLoading}
+              rowKey={rowKey}
+              onToggleExpanded={toggleExpanded}
+              onToggleRowSelection={toggleRowSelection}
+              muted
+            />
+          </div>
+          <div className="max-[1366px]:hidden">
           <Card className="w-full max-w-full min-w-0 overflow-visible rounded-2xl p-0">
             <Table
               className={TABLE_CLASS}
@@ -1891,6 +1926,7 @@ export function ReorderActionTab({
               </TableBody>
             </Table>
           </Card>
+          </div>
         </div>
       ) : null}
 

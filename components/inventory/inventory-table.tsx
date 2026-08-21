@@ -116,7 +116,7 @@ const UOM_COL_CLASS = "hidden w-16 lg:table-column";
  * Same offset as the reorder tables.
  */
 const STICKY_TH_CLASS =
-  "sticky top-[5.125rem] z-20 border-b border-[#E5E7EB] bg-[#F9FAFB] !whitespace-normal";
+  "sticky top-[5.125rem] max-[1366px]:top-0 z-20 border-b border-[#E5E7EB] bg-[#F9FAFB] !whitespace-normal";
 
 function matchesStatusFilter(
   status: ReorderStatus,
@@ -666,7 +666,7 @@ export function InventoryTable({
         </div>
       </div>
 
-      <Card className="w-full max-w-full overflow-visible rounded-2xl p-0">
+      <Card className="w-full max-w-full overflow-visible max-[1366px]:overflow-hidden rounded-2xl p-0">
         {totalCount > 0 ? (
           <p className="border-b border-slate-100 px-6 py-3 text-sm text-slate-600">
             Showing {formatNumber(cataloguePageStart)}-
@@ -690,8 +690,8 @@ export function InventoryTable({
         ) : (
           <>
             <Table
-              containerClassName="w-full max-w-full rounded-none border-0 shadow-none !overflow-visible"
-              className="table-fixed w-full"
+              containerClassName="w-full max-w-full rounded-none border-0 shadow-none !overflow-visible max-[1366px]:!overflow-x-auto"
+              className="table-fixed w-full max-[1366px]:!min-w-[1100px]"
             >
               <colgroup>
                 <col className="w-32" />
@@ -756,7 +756,9 @@ export function InventoryTable({
                   return (
                     <Fragment key={recommendation.sku}>
                       <TableRow
-                        className="cursor-pointer [&>td]:py-2.5"
+                        className={`cursor-pointer [&>td]:py-2.5 ${
+                          isExpanded ? "bg-slate-50 hover:bg-slate-50" : ""
+                        }`}
                         onClick={() =>
                           setExpandedSku((current) =>
                             current === recommendation.sku
